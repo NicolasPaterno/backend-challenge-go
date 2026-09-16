@@ -30,7 +30,7 @@ var amountPattern = regexp.MustCompile(`^-?[0-9]+(\.[0-9]{1,2})?$`)
 
 var (
 	ErrUninitialized    = errors.New("money: value is uninitialised")
-	ErrInvalidAmount    = errors.New("money: amount must be a decimal string with exactly two decimal places")
+	ErrInvalidAmount    = errors.New("money: amount must be a decimal string with at most two decimal places")
 	ErrNegativeAmount   = errors.New("money: amount must not be negative")
 	ErrInvalidCurrency  = errors.New("money: currency must be one of BRL, EUR, USD")
 	ErrOverflow         = errors.New("money: amount is out of range")
