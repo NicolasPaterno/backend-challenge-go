@@ -1,7 +1,11 @@
 // Package domain has no code of its own: this test guards every package under
-// it. §5.1 forbids money touching a float anywhere, and §14 lists that as
-// disqualifying, so the check runs under plain `go test` rather than a lint
+// internal/. §5.1 forbids money touching a float anywhere, and §14 lists that
+// as disqualifying, so the check runs under plain `go test` rather than a lint
 // target someone has to remember.
+//
+// The walk starts at internal/ rather than internal/domain (05): the HTTP codec
+// and the SQL mapping are the first float-capable code outside the domain tree,
+// and "anywhere" is cheaper to enforce than to argue about per package.
 package domain
 
 import (
@@ -15,11 +19,11 @@ import (
 	"testing"
 )
 
-func TestDomainContainsNoFloat(t *testing.T) {
+func TestInternalContainsNoFloat(t *testing.T) {
 	banned := []string{"float32", "float64", "complex64", "complex128"}
 
 	var checked int
-	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir("..", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
 		}
