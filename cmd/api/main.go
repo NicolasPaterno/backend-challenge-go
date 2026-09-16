@@ -4,6 +4,9 @@ package main
 import (
 	"go.uber.org/fx"
 
+	"github.com/NicolasPaterno/backend-challenge-go/internal/adapter/httpapi"
+	pgadapter "github.com/NicolasPaterno/backend-challenge-go/internal/adapter/postgres"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/app/walletapp"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/config"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/health"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/httpserver"
@@ -18,6 +21,9 @@ func options() fx.Option {
 		postgres.Module,
 		httpserver.Module,
 		health.Module,
+		pgadapter.Module,
+		walletapp.Module,
+		httpapi.Module,
 		fx.WithLogger(logging.FxLogger),
 	)
 }
