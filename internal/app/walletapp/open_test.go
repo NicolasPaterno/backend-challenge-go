@@ -22,6 +22,7 @@ type recordingRepo struct {
 	wallet  *wallet.Wallet
 	opening *wagering.WagerTransaction
 	entry   *wallet.LedgerEntry
+	limit   int
 	err     error
 }
 
@@ -32,6 +33,14 @@ func (r *recordingRepo) Open(_ context.Context, w *wallet.Wallet, opening *wager
 
 func (r *recordingRepo) ByID(context.Context, uuid.UUID) (*wallet.Wallet, error) {
 	return r.wallet, r.err
+}
+
+func (r *recordingRepo) Ledger(_ context.Context, _ uuid.UUID, _ *LedgerCursor, limit int) ([]*wallet.LedgerEntry, error) {
+	r.limit = limit
+	if r.entry == nil {
+		return nil, r.err
+	}
+	return []*wallet.LedgerEntry{r.entry}, r.err
 }
 
 func open(t *testing.T, amount string) (*wallet.Wallet, *recordingRepo) {

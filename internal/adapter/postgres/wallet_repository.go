@@ -122,3 +122,61 @@ func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
 }
+
+const selectLedger = `
+	SELECT id, transaction_id, direction, currency,
+	       amount_minor, balance_before_minor, balance_after_minor, created_at
+	FROM wallet_ledger_entries
+	WHERE wallet_id = $1
+	  AND ($2::timestamptz IS NULL OR (created_at, id) > ($2::timestamptz, $3::uuid))
+	ORDER BY created_at, id
+	LIMIT $4`
+
+func (r *WalletRepository) Ledger(ctx context.Context, walletID uuid.UUID, after *walletapp.LedgerCursor, limit int) ([]*wallet.LedgerEntry, error) {
+	var afterTime, afterID any
+	if after != nil {
+		afterTime, afterID = after.CreatedAt, after.ID
+	}
+
+	rows, err := r.pool.Query(ctx, selectLedger, walletID, afterTime, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select ledger: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*wallet.LedgerEntry
+	for rows.Next() {
+		var (
+			id, transactionID                    uuid.UUID
+			rawDirection, rawCurrency            string
+			amountMinor, beforeMinor, afterMinor int64
+			createdAt                            time.Time
+		)
+		if err := rows.Scan(&id, &transactionID, &rawDirection, &rawCurrency,
+			&amountMinor, &beforeMinor, &afterMinor, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan ledger entry: %w", err)
+		}
+
+		currency, err := money.ParseCurrency(rawCurrency)
+		if err != nil {
+			return nil, fmt.Errorf("ledger entry %s: %w", id, err)
+		}
+		amount, err1 := money.FromMinor(amountMinor, currency)
+		before, err2 := money.FromMinor(beforeMinor, currency)
+		balanceAfter, err3 := money.FromMinor(afterMinor, currency)
+		if err := errors.Join(err1, err2, err3); err != nil {
+			return nil, fmt.Errorf("ledger entry %s: %w", id, err)
+		}
+
+		entry, err := wallet.NewLedgerEntry(id, walletID, transactionID,
+			wallet.Direction(rawDirection), amount, before, balanceAfter, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("ledger entry %s: %w", id, err)
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read ledger: %w", err)
+	}
+	return entries, nil
+}

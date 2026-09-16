@@ -27,6 +27,7 @@ var (
 type Repository interface {
 	Open(ctx context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry) error
 	ByID(ctx context.Context, id uuid.UUID) (*wallet.Wallet, error)
+	Ledger(ctx context.Context, walletID uuid.UUID, after *LedgerCursor, limit int) ([]*wallet.LedgerEntry, error)
 }
 
 // A port so a test can make ids predictable without making them predictable in
