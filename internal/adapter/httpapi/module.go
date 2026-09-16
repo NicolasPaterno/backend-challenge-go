@@ -11,5 +11,6 @@ var Module = fx.Module("http-adapter",
 		NewWalletHandler,
 		httpserver.AsRoute(NewOpenWalletRoute),
 		httpserver.AsRoute(NewGetWalletRoute),
+		httpserver.AsRoute(NewGetWalletLedgerRoute),
 	),
 )
