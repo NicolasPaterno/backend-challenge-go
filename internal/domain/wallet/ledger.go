@@ -13,6 +13,7 @@ import (
 var (
 	ErrInvalidDirection = errors.New("wallet: direction must be DEBIT or CREDIT")
 	ErrLedgerEquation   = errors.New("wallet: balanceAfter does not match balanceBefore and the movement")
+	ErrEmptyMovement    = errors.New("wallet: a ledger entry must move a non-zero amount")
 )
 
 type Direction string
@@ -26,7 +27,7 @@ func (d Direction) IsValid() bool { return d == DirectionDebit || d == Direction
 
 func (d Direction) String() string { return string(d) }
 
-// LedgerEntry is immutable: a correction is a new entry, never an edit
+// LedgerEntry is immutable: a correction is a new entry, never an edit (§5.5).
 type LedgerEntry struct {
 	id            uuid.UUID
 	walletID      uuid.UUID
@@ -38,23 +39,34 @@ type LedgerEntry struct {
 	createdAt     time.Time
 }
 
-// NewLedgerEntry refuses any entry whose arithmetic does not hold:
+// NewLedgerEntry refuses whatever the schema refuses, so an impossible entry
+// fails as a domain error and not as a constraint violation at INSERT time.
 func NewLedgerEntry(id, walletID, transactionID uuid.UUID, direction Direction, amount, balanceBefore, balanceAfter money.Money, createdAt time.Time) (*LedgerEntry, error) {
-	for name, value := range map[string]uuid.UUID{"id": id, "walletId": walletID, "transactionId": transactionID} {
-		if value == uuid.Nil() {
-			return nil, fmt.Errorf("%w: %s", ErrUninitialized, name)
+	for _, field := range []struct {
+		name string
+		id   uuid.UUID
+	}{{"id", id}, {"walletId", walletID}, {"transactionId", transactionID}} {
+		if field.id == uuid.Nil() {
+			return nil, fmt.Errorf("%w: %s", ErrUninitialized, field.name)
 		}
 	}
 	if !direction.IsValid() {
 		return nil, fmt.Errorf("%w, got %q", ErrInvalidDirection, string(direction))
 	}
-	for name, value := range map[string]money.Money{"amount": amount, "balanceBefore": balanceBefore, "balanceAfter": balanceAfter} {
-		if !value.IsValid() {
-			return nil, fmt.Errorf("%w: %s", ErrUninitialized, name)
+	for _, field := range []struct {
+		name   string
+		amount money.Money
+	}{{"amount", amount}, {"balanceBefore", balanceBefore}, {"balanceAfter", balanceAfter}} {
+		if !field.amount.IsValid() {
+			return nil, fmt.Errorf("%w: %s", ErrUninitialized, field.name)
 		}
 	}
 	if amount.IsNegative() {
 		return nil, fmt.Errorf("%w: entry amount %s", money.ErrNegativeAmount, amount)
+	}
+	// §6.4: a movement of nothing produces no entry.
+	if amount.IsZero() {
+		return nil, ErrEmptyMovement
 	}
 	if createdAt.IsZero() {
 		return nil, fmt.Errorf("%w: createdAt", ErrUninitialized)

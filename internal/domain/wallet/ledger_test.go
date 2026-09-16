@@ -21,7 +21,6 @@ func TestNewLedgerEntryEnforcesTheBalanceEquation(t *testing.T) {
 	}{
 		"debit holds":         {wallet.DirectionDebit, "25.00", "1000.00", "975.00", false},
 		"credit holds":        {wallet.DirectionCredit, "25.00", "1000.00", "1025.00", false},
-		"zero holds":          {wallet.DirectionCredit, "0.00", "1000.00", "1000.00", false},
 		"debit off by a cent": {wallet.DirectionDebit, "25.00", "1000.00", "975.01", true},
 		"debit signed wrong":  {wallet.DirectionDebit, "25.00", "1000.00", "1025.00", true},
 		"credit signed wrong": {wallet.DirectionCredit, "25.00", "1000.00", "975.00", true},
@@ -56,6 +55,10 @@ func TestNewLedgerEntryRejectsInvalidInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromMinor error = %v", err)
 	}
+	zero, err := money.Zero(money.BRL)
+	if err != nil {
+		t.Fatalf("Zero error = %v", err)
+	}
 
 	tests := map[string]struct {
 		id, wallet, tx uuid.UUID
@@ -71,6 +74,7 @@ func TestNewLedgerEntryRejectsInvalidInput(t *testing.T) {
 		"unknown direction": {entryID, walletID, txID, wallet.Direction("TRANSFER"), amount, movedAt, wallet.ErrInvalidDirection},
 		"invalid money":     {entryID, walletID, txID, wallet.DirectionDebit, money.Money{}, movedAt, wallet.ErrUninitialized},
 		"negative amount":   {entryID, walletID, txID, wallet.DirectionDebit, negative, movedAt, money.ErrNegativeAmount},
+		"zero amount":       {entryID, walletID, txID, wallet.DirectionDebit, zero, movedAt, wallet.ErrEmptyMovement},
 		"currency mismatch": {entryID, walletID, txID, wallet.DirectionDebit, euro, movedAt, money.ErrCurrencyMismatch},
 		"zero time":         {entryID, walletID, txID, wallet.DirectionDebit, amount, time.Time{}, wallet.ErrUninitialized},
 	}
