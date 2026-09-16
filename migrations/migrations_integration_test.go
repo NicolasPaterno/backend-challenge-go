@@ -35,7 +35,7 @@ func TestMigrationsApplyAndRollBack(t *testing.T) {
 	if err := migrations.Up(databaseURL); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
-	assertVersion(1)
+	assertVersion(4)
 
 	conn, err := pgx.Connect(ctx, databaseURL)
 	if err != nil {
@@ -50,6 +50,16 @@ func TestMigrationsApplyAndRollBack(t *testing.T) {
 	}
 	if !installed {
 		t.Error("pgcrypto is not installed after Up()")
+	}
+
+	for _, table := range []string{"wallets", "wager_transactions", "wallet_ledger_entries"} {
+		var exists bool
+		if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil {
+			t.Fatalf("query to_regclass(%s): %v", table, err)
+		}
+		if !exists {
+			t.Errorf("table %s is missing after Up()", table)
+		}
 	}
 
 	if err := migrations.Up(databaseURL); err != nil {
