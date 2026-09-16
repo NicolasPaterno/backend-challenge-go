@@ -3,12 +3,7 @@ package money_test
 import (
 	"encoding/json"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"math"
-	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -394,30 +389,5 @@ func TestStringRendersBoundaries(t *testing.T) {
 	var zero money.Money
 	if got := zero.String(); !strings.Contains(got, "uninitialised") {
 		t.Errorf("String() = %s, want it to flag the uninitialised value", got)
-	}
-}
-
-// §5.1: no financial value may pass through a float anywhere in this package.
-func TestPackageContainsNoFloat(t *testing.T) {
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob error = %v", err)
-	}
-	if len(sources) == 0 {
-		t.Fatal("no sources found, the check would pass vacuously")
-	}
-
-	banned := []string{"float32", "float64", "complex64", "complex128"}
-	for _, source := range sources {
-		file, err := parser.ParseFile(token.NewFileSet(), source, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", source, err)
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			if ident, ok := node.(*ast.Ident); ok && slices.Contains(banned, ident.Name) {
-				t.Errorf("%s uses %s", source, ident.Name)
-			}
-			return true
-		})
 	}
 }

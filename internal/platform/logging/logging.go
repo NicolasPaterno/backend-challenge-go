@@ -22,8 +22,6 @@ func New(cfg config.Config) *slog.Logger {
 
 var Module = fx.Module("logging", fx.Provide(New))
 
-// FxLogger routes Fx's own lifecycle events through the JSON logger. Apply it
-// with fx.WithLogger at the root of the application, not inside a module.
 func FxLogger(logger *slog.Logger) fxevent.Logger {
 	return &fxevent.SlogLogger{Logger: logger.With(slog.String("component", "fx"))}
 }

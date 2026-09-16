@@ -54,10 +54,10 @@ type Money struct {
 	currency Currency
 }
 
-// Parse reads an amount arriving from outside the system: exactly two decimal
-// places and no negative sign (§6.1). Equivalent spellings such as "25" or
-// "25.0" are rejected rather than normalised, so the idempotency hash of a
-// payload needs no normalisation step to document (§9).
+// Parse reads an amount arriving from outside the system: no negative sign, and
+// a scale of at most two decimal places (§6.1). Equivalent spellings such as
+// "25" or "25.0" normalise to the same minor units, so the idempotency hash
+// must be taken over those units and never over the received text (§9, A.3.1).
 func Parse(amount string, currency Currency) (Money, error) {
 	if err := checkCurrency(currency); err != nil {
 		return Money{}, err
@@ -88,8 +88,6 @@ func (m Money) Minor() int64 { return m.minor }
 
 func (m Money) Currency() Currency { return m.currency }
 
-// IsValid reports whether the value was built by a constructor. Callers that
-// reject uninitialised domain values (§6) test this, not IsZero.
 func (m Money) IsValid() bool { return m.currency.IsValid() }
 
 func (m Money) IsZero() bool { return m.minor == 0 }
