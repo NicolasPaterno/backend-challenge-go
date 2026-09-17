@@ -725,14 +725,21 @@ type outboxRow struct {
 	published *time.Time
 }
 
+func (w *wagering) connect() *pgx.Conn {
+	w.t.Helper()
+
+	conn, err := pgx.Connect(context.Background(), w.databaseURL)
+	if err != nil {
+		w.t.Fatalf("connect: %v", err)
+	}
+	return conn
+}
+
 func (w *wagering) outbox(walletID string) []outboxRow {
 	w.t.Helper()
 
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, w.databaseURL)
-	if err != nil {
-		w.t.Fatalf("connect: %v", err)
-	}
+	conn := w.connect()
 	defer conn.Close(ctx)
 
 	id, err := uuid.Parse(walletID)
