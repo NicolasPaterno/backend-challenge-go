@@ -370,6 +370,20 @@ func (t *WagerTransaction) MarkProcessed(resultBalance money.Money, now time.Tim
 	return nil
 }
 
+// ResolveReference records the internal id the lookup by
+// (providerId, referenceExternalTransactionId) found, so a reversal keeps a
+// link to what it undid even when it is then rejected (§6.3, §7).
+func (t *WagerTransaction) ResolveReference(id uuid.UUID) error {
+	if !t.kind.IsReversal() {
+		return fmt.Errorf("%w: %s", ErrNoReference, t.kind)
+	}
+	if id == uuid.Nil() {
+		return fmt.Errorf("%w: referenceTransactionId", ErrUninitialized)
+	}
+	t.referenceTransactionID = id
+	return nil
+}
+
 func (t *WagerTransaction) MarkPendingReference(now time.Time) error {
 	return t.transition(StatusPendingReference, now)
 }
