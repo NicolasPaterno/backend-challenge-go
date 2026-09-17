@@ -21,6 +21,7 @@ func TestAppStartStop(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0") // let the kernel pick a free port
 	t.Setenv("LOG_LEVEL", "warn")
 	testsupport.KeycloakEnv(t)
+	testsupport.SQSEnv(t)
 
 	var server *http.Server
 	fxApp := fxtest.New(t, options(), fx.Populate(&server))
@@ -60,6 +61,7 @@ func TestStartFailsWhenPostgresIsUnreachable(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("STARTUP_TIMEOUT", "5s")
 	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("OUTBOX_QUEUE_URL", "http://127.0.0.1:1/000000000000/events.fifo")
 	testsupport.KeycloakEnv(t)
 
 	fxApp := fx.New(options(), fx.NopLogger, fx.StartTimeout(20*time.Second))
@@ -86,6 +88,7 @@ func TestPortInUseFailsStartup(t *testing.T) {
 	t.Setenv("DATABASE_URL", testsupport.PostgresMigrated(t))
 	t.Setenv("HTTP_ADDR", listener.Addr().String())
 	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("OUTBOX_QUEUE_URL", "http://127.0.0.1:1/000000000000/events.fifo")
 	testsupport.KeycloakEnv(t)
 
 	fxApp := fx.New(options(), fx.NopLogger)

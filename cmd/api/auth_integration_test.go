@@ -21,6 +21,7 @@ func TestWalletRoutesAcceptOnlyTheInternalService(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("LOG_LEVEL", "error")
 	issuer := testsupport.KeycloakEnv(t)
+	testsupport.SQSEnv(t)
 
 	var server *http.Server
 	fxApp := fxtest.New(t, options(), fx.Populate(&server))
@@ -83,6 +84,7 @@ func TestUnauthorizedReadExposesNoWalletData(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("LOG_LEVEL", "error")
 	issuer := testsupport.KeycloakEnv(t)
+	testsupport.SQSEnv(t)
 
 	var server *http.Server
 	fxApp := fxtest.New(t, options(), fx.Populate(&server))
