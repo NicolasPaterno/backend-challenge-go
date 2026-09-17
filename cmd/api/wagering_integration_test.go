@@ -28,6 +28,9 @@ type wagering struct {
 	databaseURL string
 	internal    *http.Client
 	provider    *http.Client
+
+	app     *fxtest.App
+	stopped bool
 }
 
 func startWagering(t *testing.T) *wagering {
@@ -37,21 +40,36 @@ func startWagering(t *testing.T) *wagering {
 	t.Setenv("DATABASE_URL", databaseURL)
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("LOG_LEVEL", "error")
+	// The reference worker's cadence, so a wait resolves inside a test rather
+	// than on the one-second production tick.
+	t.Setenv("REFERENCE_POLL_INTERVAL", "200ms")
 	issuer := testsupport.KeycloakEnv(t)
 	testsupport.SQSEnv(t)
 
 	var server *http.Server
 	app := fxtest.New(t, options(), fx.Populate(&server))
 	app.RequireStart()
-	t.Cleanup(app.RequireStop)
 
-	return &wagering{
+	w := &wagering{
 		t:           t,
 		base:        "http://" + server.Addr,
 		databaseURL: databaseURL,
 		internal:    testsupport.BearerClient(t, issuer, testsupport.InternalClient),
 		provider:    testsupport.BearerClient(t, issuer, testsupport.ProviderAClient),
+		app:         app,
 	}
+	t.Cleanup(w.stop)
+	return w
+}
+
+// stop is idempotent so a test may shut the instance down mid-way and still
+// leave the cleanup in place.
+func (w *wagering) stop() {
+	if w.stopped {
+		return
+	}
+	w.stopped = true
+	w.app.RequireStop()
 }
 
 func (w *wagering) openWallet(playerID, balance string) string {
@@ -153,6 +171,46 @@ func (w *wagering) bet(b bet) betResult {
 		IdempotentReplay: body.IdempotentReplay,
 		Balance:          body.Balance.Amount,
 		Code:             body.Code,
+	}
+}
+
+// transaction reads one operation back, which is how a test observes work the
+// reference worker finished after the request had already answered 202 (§9).
+func (w *wagering) transaction(id string) (status, code string) {
+	w.t.Helper()
+
+	resp, err := w.provider.Get(w.base + "/wagering/transactions/" + id)
+	if err != nil {
+		w.t.Fatalf("GET /wagering/transactions/%s: %v", id, err)
+	}
+	defer resp.Body.Close()
+
+	var read struct {
+		Status      string `json:"status"`
+		FailureCode string `json:"failureCode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&read); err != nil {
+		w.t.Fatalf("decode transaction: %v", err)
+	}
+	return read.Status, read.FailureCode
+}
+
+// awaitStatus polls until the worker has moved the record, or gives up. The
+// worker is asynchronous by definition, so there is nothing to synchronise on
+// from out here.
+func (w *wagering) awaitStatus(id, want string) string {
+	w.t.Helper()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		status, code := w.transaction(id)
+		if status == want {
+			return code
+		}
+		if time.Now().After(deadline) {
+			w.t.Fatalf("transaction %s is %s after 20s, want %s", id, status, want)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
