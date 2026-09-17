@@ -158,5 +158,32 @@ behind a build tag so the default run stays fast. They need a running Docker:
 go test -race -tags integration -timeout 20m ./...
 ```
 
+### Multiple instances
+
+`test/system` is the multi-instance suite: it builds the API with the race
+detector and runs **three independent processes** against shared containers, so
+the guarantees §8 and §13.4 ask for are demonstrated across processes rather
+than across goroutines. It is separate from the integration run because it is
+slower:
+
+```sh
+go test -race -tags 'integration,system' -timeout 40m ./test/system/...
+```
+
+Each scenario ends by reconciling every wallet it touched against its ledger.
+The failure simulations live there too: an instance killed with `SIGKILL` while
+the queue is being worked, a reversal whose reference has not arrived yet losing
+the instance that accepted it, and three publishers draining one outbox with one
+of them dying mid-flight.
+
+To run several instances by hand instead, Compose publishes a port range:
+
+```sh
+docker compose up --build --scale api=3
+curl -i http://localhost:8080/health/ready
+curl -i http://localhost:8081/health/ready
+curl -i http://localhost:8082/health/ready
+```
+
 The `Makefile` wraps all of these: `run`, `build`, `test`, `test-race`,
-`test-integration`, `vet`, `fmt`, `migrate-up`, `migrate-down`.
+`test-integration`, `test-system`, `vet`, `fmt`, `migrate-up`, `migrate-down`.
