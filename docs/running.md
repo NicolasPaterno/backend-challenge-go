@@ -26,12 +26,25 @@ cp .env.example .env
 | `DATABASE_URL` | — | **Required.** PostgreSQL connection string |
 | `DB_MAX_CONNS` / `DB_MIN_CONNS` | `10` / `1` | Connection pool bounds |
 | `DB_LOCK_TIMEOUT` | `3s` | How long a statement waits for a contended row before failing |
-| `SHUTDOWN_TIMEOUT` | `15s` | Budget for draining in-flight requests on `SIGTERM` |
+| `SHUTDOWN_TIMEOUT` | `15s` | Budget for the whole shutdown on `SIGTERM` |
+| `WORKER_DRAIN_TIMEOUT` | `5s` | Each worker's share of it, so none can spend the whole budget |
 | `STARTUP_TIMEOUT` | `15s` | Budget for the dependency checks at boot |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Slow-header protection |
 | `OIDC_ISSUER_URL` | — | **Required.** Issuer as it appears in the tokens |
 | `OIDC_DISCOVERY_URL` | the issuer | Where the metadata and JWKS are fetched from |
 | `OIDC_AUDIENCE` | — | **Required.** Audience the tokens must carry |
+| `SQS_WAGER_TRANSACTIONS_QUEUE_URL` | — | **Required.** Queue the wager consumer reads from |
+| `SQS_WAGER_TRANSACTIONS_DLQ_URL` | — | **Required.** Dead-letter queue for messages that can never be handled |
+| `SQS_EVENTS_QUEUE_URL` | — | **Required.** Queue the outbox publisher sends to |
+| `OUTBOX_POLL_INTERVAL` | `1s` | Wait between publish cycles |
+| `OUTBOX_PUBLISH_WINDOW` | `10s` | Deadline on one publish cycle |
+| `OUTBOX_BATCH_SIZE` | `100` | Rows claimed per cycle |
+| `REFERENCE_POLL_INTERVAL` | `1s` | Wait between reference resolution cycles |
+| `REFERENCE_BATCH_SIZE` | `100` | Waiting reversals swept per cycle |
+| `REFERENCE_TTL` | `24h` | How long a reversal waits for its reference before being rejected |
+| `AWS_REGION` | `us-east-1` | Region the SQS client signs for |
+| `SQS_ENDPOINT` | unset | LocalStack's address; unset means real SQS |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | — | Broker credentials; `test`/`test` against LocalStack |
 
 Startup validates all of them at once and refuses to build the application if
 any is invalid, so a misconfigured deployment fails immediately and reports
@@ -43,8 +56,10 @@ every problem in one message.
 docker compose up --build
 ```
 
-This starts PostgreSQL and Keycloak, runs the migrations to completion, then
-starts the API.
+This starts PostgreSQL, Keycloak and LocalStack — which creates
+`wager-events.fifo`, `wager-transactions.fifo` and its dead-letter queue from
+`localstack/init-queues.sh` — runs the migrations to completion, then starts the
+API.
 
 ```sh
 curl -i http://localhost:8080/health/live
@@ -94,7 +109,9 @@ A missing, malformed, expired or wrong-audience token gets `401` with a
 `403`, as does the internal token on an operation route. All are
 `application/problem+json` and none carries wallet data.
 
-`docs/wagering.md` covers submitting an operation: the idempotency rules, the
+`docs/consumer.md` covers the inbound queue: the inbox, the deletion rules, the
+redrive policy and the group keys. `docs/outbox.md` covers the publisher: the claim, the backoff, and the contract
+of the outbound queue. `docs/wagering.md` covers submitting an operation: the idempotency rules, the
 payload hash, the per-wallet locking, and the full status-code table.
 
 ## Migrations
@@ -131,8 +148,8 @@ go vet ./...
 gofmt -l .           # prints nothing when formatting is clean
 ```
 
-Integration tests run real containers — PostgreSQL and Keycloak, never mocks,
-per §13 and are gated
+Integration tests run real containers — PostgreSQL, Keycloak and LocalStack,
+never mocks, per §13 and are gated
 behind a build tag so the default run stays fast. They need a running Docker:
 
 ```sh
