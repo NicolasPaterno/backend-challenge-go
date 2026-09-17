@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"uuid"
 
@@ -664,5 +666,125 @@ func TestReversalsAreNotSupportedYet(t *testing.T) {
 				t.Errorf("status = %d, want %d (%+v)", refused.Status, http.StatusBadRequest, refused)
 			}
 		})
+	}
+}
+
+// event_id is a UUIDv7 taken from the same generator in write order, so it is
+// also the order the events were produced in.
+const selectOutbox = `
+	SELECT event_type, payload, published_at
+	FROM outbox_events WHERE aggregate_id = $1 ORDER BY event_id`
+
+type outboxRow struct {
+	eventType string
+	payload   map[string]any
+	published *time.Time
+}
+
+func (w *wagering) outbox(walletID string) []outboxRow {
+	w.t.Helper()
+
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, w.databaseURL)
+	if err != nil {
+		w.t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	id, err := uuid.Parse(walletID)
+	if err != nil {
+		w.t.Fatalf("parse wallet id: %v", err)
+	}
+	rows, err := conn.Query(ctx, selectOutbox, id)
+	if err != nil {
+		w.t.Fatalf("select outbox: %v", err)
+	}
+	defer rows.Close()
+
+	var out []outboxRow
+	for rows.Next() {
+		var (
+			row outboxRow
+			raw []byte
+		)
+		if err := rows.Scan(&row.eventType, &raw, &row.published); err != nil {
+			w.t.Fatalf("scan outbox row: %v", err)
+		}
+		if err := json.Unmarshal(raw, &row.payload); err != nil {
+			w.t.Fatalf("decode payload: %v", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		w.t.Fatalf("read outbox: %v", err)
+	}
+	return out
+}
+
+func (w *wagering) outboxTypes(walletID string) []string {
+	w.t.Helper()
+
+	var types []string
+	for _, row := range w.outbox(walletID) {
+		types = append(types, row.eventType)
+	}
+	return types
+}
+
+// §11: every outcome writes its events in the commit that caused it, and §5.4
+// leaves them unpublished until 11 exists.
+func TestOutcomesWriteTheirEventsToTheOutbox(t *testing.T) {
+	api := startWagering(t)
+	playerID := uuid.NewV7().String()
+	walletID := api.openWallet(playerID, "100.00")
+
+	if got := api.outboxTypes(walletID); !slices.Equal(got, []string{"WagerTransactionProcessed", "WalletBalanceChanged"}) {
+		t.Fatalf("after opening, outbox = %v", got)
+	}
+
+	api.bet(bet{externalID: "t-bet", key: "provider-a:t-bet", playerID: playerID, walletID: walletID, amount: "25.00"})
+	api.bet(bet{externalID: "t-loss", key: "provider-a:t-loss", playerID: playerID, walletID: walletID, amount: "0.00", kind: "LOSS"})
+	api.bet(bet{externalID: "t-broke", key: "provider-a:t-broke", playerID: playerID, walletID: walletID, amount: "9999.00"})
+
+	want := []string{
+		"WagerTransactionProcessed", "WalletBalanceChanged", // the opening
+		"WagerTransactionProcessed", "WalletBalanceChanged", // the BET
+		"WagerTransactionProcessed", // the LOSS moves nothing (§7)
+		"WagerTransactionRejected",  // insufficient funds
+	}
+	rows := api.outbox(walletID)
+	if got := api.outboxTypes(walletID); !slices.Equal(got, want) {
+		t.Fatalf("outbox = %v, want %v", got, want)
+	}
+
+	for _, row := range rows {
+		if row.published != nil {
+			t.Errorf("%s is published, but nothing publishes before 11 (§5.4)", row.eventType)
+		}
+		for _, field := range []string{"eventId", "eventType", "aggregateId", "correlationId", "occurredAt", "version", "data"} {
+			if _, ok := row.payload[field]; !ok {
+				t.Errorf("%s payload has no %q", row.eventType, field)
+			}
+		}
+		if row.payload["eventType"] != row.eventType {
+			t.Errorf("column says %s, payload says %v", row.eventType, row.payload["eventType"])
+		}
+	}
+
+	// A replay re-applies nothing, so it owes no second copy (§9).
+	api.bet(bet{externalID: "t-bet", key: "provider-a:t-bet", playerID: playerID, walletID: walletID, amount: "25.00"})
+	if got := api.outboxTypes(walletID); !slices.Equal(got, want) {
+		t.Errorf("after the replay, outbox = %v, want the unchanged %v", got, want)
+	}
+}
+
+// §9: a zero opening creates no OPENING, no ledger entry and none of these
+// financial events.
+func TestZeroOpeningWritesNoEvents(t *testing.T) {
+	api := startWagering(t)
+	walletID := api.openWallet(uuid.NewV7().String(), "0.00")
+
+	if got := api.outbox(walletID); len(got) != 0 {
+		t.Errorf("outbox = %v, want none", got)
 	}
 }

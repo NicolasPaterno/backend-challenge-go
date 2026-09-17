@@ -4,6 +4,7 @@ package migrations_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -35,7 +36,7 @@ func TestMigrationsApplyAndRollBack(t *testing.T) {
 	if err := migrations.Up(databaseURL); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
-	assertVersion(7)
+	assertVersion(latestVersion(t))
 
 	conn, err := pgx.Connect(ctx, databaseURL)
 	if err != nil {
@@ -52,7 +53,7 @@ func TestMigrationsApplyAndRollBack(t *testing.T) {
 		t.Error("pgcrypto is not installed after Up()")
 	}
 
-	for _, table := range []string{"wallets", "wager_transactions", "wallet_ledger_entries"} {
+	for _, table := range []string{"wallets", "wager_transactions", "wallet_ledger_entries", "outbox_events"} {
 		var exists bool
 		if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil {
 			t.Fatalf("query to_regclass(%s): %v", table, err)
@@ -70,4 +71,17 @@ func TestMigrationsApplyAndRollBack(t *testing.T) {
 		t.Fatalf("Down() error = %v", err)
 	}
 	assertVersion(0)
+}
+
+// Counted rather than written down, so adding a migration does not also mean
+// editing this test. The prefixes are contiguous from 0001, so the count is the
+// top version.
+func latestVersion(t *testing.T) uint {
+	t.Helper()
+
+	ups, err := filepath.Glob("*.up.sql")
+	if err != nil || len(ups) == 0 {
+		t.Fatalf("no migrations found: %v", err)
+	}
+	return uint(len(ups))
 }

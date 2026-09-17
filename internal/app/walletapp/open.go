@@ -10,6 +10,7 @@ import (
 
 	"uuid"
 
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/events"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
@@ -21,11 +22,10 @@ var (
 )
 
 // Open takes the whole aggregate rather than a transaction handle: §9 requires
-// the wallet, its OPENING and the credit entry to share one commit, and a
-// single method makes a partial write unrepresentable. 10 adds the outbox
-// records to this signature.
+// the wallet, its OPENING, the credit entry and the outbox records to share one
+// commit, and a single method makes a partial write unrepresentable.
 type Repository interface {
-	Open(ctx context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry) error
+	Open(ctx context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry, outbox []events.Envelope) error
 	ByID(ctx context.Context, id uuid.UUID) (*wallet.Wallet, error)
 	Ledger(ctx context.Context, walletID uuid.UUID, after *LedgerCursor, limit int) ([]*wallet.LedgerEntry, error)
 }
@@ -63,9 +63,10 @@ func (s *Service) Open(ctx context.Context, p OpenParams) (*wallet.Wallet, error
 		return nil, err
 	}
 
-	// §9: a zero opening credits nothing, so there is no OPENING and no entry.
+	// §9: a zero opening credits nothing, so there is no OPENING, no entry and
+	// none of the financial events.
 	if p.InitialBalance.IsZero() {
-		if err := s.repo.Open(ctx, w, nil, nil); err != nil {
+		if err := s.repo.Open(ctx, w, nil, nil, nil); err != nil {
 			return nil, err
 		}
 		return w, nil
@@ -91,7 +92,14 @@ func (s *Service) Open(ctx context.Context, p OpenParams) (*wallet.Wallet, error
 		return nil, err
 	}
 
-	if err := s.repo.Open(ctx, w, opening, entry); err != nil {
+	// The OPENING's id stands in as correlationId while nothing carries one
+	// (A.1); 16 replaces it with the request's.
+	outbox := []events.Envelope{
+		events.NewWagerTransactionProcessed(s.ids.NewID(), openingID, opening, now),
+		events.NewWalletBalanceChanged(s.ids.NewID(), openingID, entry, w.Version(), now),
+	}
+
+	if err := s.repo.Open(ctx, w, opening, entry, outbox); err != nil {
 		return nil, err
 	}
 	return w, nil

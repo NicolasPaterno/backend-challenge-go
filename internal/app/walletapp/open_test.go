@@ -2,10 +2,12 @@ package walletapp
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"uuid"
 
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/events"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
@@ -22,12 +24,13 @@ type recordingRepo struct {
 	wallet  *wallet.Wallet
 	opening *wagering.WagerTransaction
 	entry   *wallet.LedgerEntry
+	outbox  []events.Envelope
 	limit   int
 	err     error
 }
 
-func (r *recordingRepo) Open(_ context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry) error {
-	r.wallet, r.opening, r.entry = w, opening, entry
+func (r *recordingRepo) Open(_ context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry, outbox []events.Envelope) error {
+	r.wallet, r.opening, r.entry, r.outbox = w, opening, entry, outbox
 	return r.err
 }
 
@@ -90,5 +93,42 @@ func TestOpenWithAZeroBalanceWritesNoOpeningAndNoEntry(t *testing.T) {
 	}
 	if opened.Version() != 1 || !opened.Balance().IsZero() {
 		t.Errorf("wallet = %s at version %d, want 0.00 at version 1", opened.Balance(), opened.Version())
+	}
+}
+
+// §9: the opening's two events share the wallet's commit, and a zero opening
+// writes neither.
+func TestOpenWritesItsEventsToTheOutbox(t *testing.T) {
+	_, repo := open(t, "1000.00")
+
+	var types []string
+	for _, e := range repo.outbox {
+		types = append(types, e.EventType)
+		if e.AggregateID != repo.wallet.ID() {
+			t.Errorf("%s aggregateId = %s, want the wallet", e.EventType, e.AggregateID)
+		}
+		if e.CorrelationID != repo.opening.ID() {
+			t.Errorf("%s correlationId = %s, want the OPENING's id (A.1)", e.EventType, e.CorrelationID)
+		}
+	}
+	want := []string{events.TypeWagerTransactionProcessed, events.TypeWalletBalanceChanged}
+	if !slices.Equal(types, want) {
+		t.Errorf("outbox = %v, want %v", types, want)
+	}
+
+	balance, ok := repo.outbox[1].Data.(events.WalletBalanceChanged)
+	if !ok {
+		t.Fatalf("data is %T, want events.WalletBalanceChanged", repo.outbox[1].Data)
+	}
+	if balance.WalletVersion != 1 {
+		t.Errorf("walletVersion = %d, want the 1 §9 pins the opening at", balance.WalletVersion)
+	}
+	if got := balance.BalanceAfter.String(); got != "1000.00 BRL" {
+		t.Errorf("balanceAfter = %s, want 1000.00 BRL", got)
+	}
+
+	_, zero := open(t, "0.00")
+	if len(zero.outbox) != 0 {
+		t.Errorf("a zero opening wrote %d events, want none", len(zero.outbox))
 	}
 }

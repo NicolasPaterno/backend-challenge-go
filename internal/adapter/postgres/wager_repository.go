@@ -63,7 +63,7 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 			observed = w.Version()
 		}
 
-		entry, err := decide(w)
+		entry, outbox, err := decide(w)
 		if err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 		}
 
 		if entry == nil {
-			return nil
+			return insertOutbox(ctx, tx, outbox)
 		}
 
 		_, err = tx.Exec(ctx, insertLedgerEntry,
@@ -103,7 +103,8 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 		if tag.RowsAffected() != 1 {
 			return fmt.Errorf("wallet %s: %w", w.ID(), wageringapp.ErrConcurrentUpdate)
 		}
-		return nil
+
+		return insertOutbox(ctx, tx, outbox)
 	})
 }
 

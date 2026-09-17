@@ -10,6 +10,7 @@ import (
 
 	"uuid"
 
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/events"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
@@ -29,12 +30,13 @@ var (
 )
 
 // Decide runs inside the repository's SQL transaction with the wallet row
-// already locked. It returns nil when the operation moved no money, and settles
-// the transaction's own state before the repository writes it.
+// already locked. It settles the transaction's own state, and returns the
+// movement — nil when the operation moved no money — together with the events
+// that outcome owes, for the repository to write in the same commit (§5.4).
 //
 // w is nil when no wallet carries that id. That is a rejection like any other
 // and is still recorded, because §11 owes every rejection an event.
-type Decide func(w *wallet.Wallet) (*wallet.LedgerEntry, error)
+type Decide func(w *wallet.Wallet) (*wallet.LedgerEntry, []events.Envelope, error)
 
 // Process owns the whole commit rather than handing out a transaction handle: a
 // caller holding one could commit half of it (§5.3).
@@ -143,15 +145,15 @@ func (s *Service) replay(ctx context.Context, p SubmitParams, hash string) (Resu
 // The balance reported here is the one a replay returns, even after later
 // movements (§9).
 func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
-	return func(w *wallet.Wallet) (*wallet.LedgerEntry, error) {
+	return func(w *wallet.Wallet) (*wallet.LedgerEntry, []events.Envelope, error) {
 		// One code for "no such wallet" and "not this player's wallet": telling
 		// them apart would enumerate wallets (§2). Neither has a balance to
 		// report, so the rejection carries the zero Money (04 §7).
 		if w == nil || w.PlayerID() != t.PlayerID() {
-			return nil, t.Reject(wagering.FailureWalletNotFound, money.Money{}, now)
+			return s.reject(t, wagering.FailureWalletNotFound, money.Money{}, now)
 		}
 		if w.Currency() != t.Amount().Currency() {
-			return nil, t.Reject(wagering.FailureCurrencyMismatch, w.Balance(), now)
+			return s.reject(t, wagering.FailureCurrencyMismatch, w.Balance(), now)
 		}
 
 		var (
@@ -166,17 +168,48 @@ func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
 		case wagering.KindLoss:
 			// §7: no movement — the money already left on the BET.
 		default:
-			return nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
+			return nil, nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
 		}
 
 		switch {
 		case errors.Is(err, wallet.ErrInsufficientFunds):
-			return nil, t.Reject(wagering.FailureInsufficientFunds, w.Balance(), now)
+			return s.reject(t, wagering.FailureInsufficientFunds, w.Balance(), now)
 		case err != nil:
-			return nil, err
+			return nil, nil, err
 		}
-		return entry, t.MarkProcessed(w.Balance(), now)
+		if err := t.MarkProcessed(w.Balance(), now); err != nil {
+			return nil, nil, err
+		}
+		return entry, s.outbox(t, entry, w.Version(), now), nil
 	}
+}
+
+func (s *Service) reject(t *wagering.WagerTransaction, code wagering.FailureCode, balance money.Money, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
+	if err := t.Reject(code, balance, now); err != nil {
+		return nil, nil, err
+	}
+	return nil, s.outbox(t, nil, 0, now), nil
+}
+
+// The events an outcome owes (§11). entry is nil when no money moved, which is
+// what makes a LOSS produce WagerTransactionProcessed and no
+// WalletBalanceChanged (§7).
+//
+// The transaction's id stands in as correlationId while nothing carries one;
+// 16 replaces it with the request's or the message's.
+func (s *Service) outbox(t *wagering.WagerTransaction, entry *wallet.LedgerEntry, walletVersion int64, now time.Time) []events.Envelope {
+	switch t.Status() {
+	case wagering.StatusRejected:
+		return []events.Envelope{events.NewWagerTransactionRejected(s.ids.NewID(), t.ID(), t, now)}
+	case wagering.StatusPendingReference:
+		return []events.Envelope{events.NewWagerTransactionPendingReference(s.ids.NewID(), t.ID(), t, now)}
+	}
+
+	outbox := []events.Envelope{events.NewWagerTransactionProcessed(s.ids.NewID(), t.ID(), t, now)}
+	if entry != nil {
+		outbox = append(outbox, events.NewWalletBalanceChanged(s.ids.NewID(), t.ID(), entry, walletVersion, now))
+	}
+	return outbox
 }
 
 func (s *Service) ByID(ctx context.Context, id uuid.UUID) (*wagering.WagerTransaction, error) {

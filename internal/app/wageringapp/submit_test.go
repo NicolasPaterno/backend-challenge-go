@@ -3,11 +3,13 @@ package wageringapp
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"uuid"
 
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/events"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
@@ -25,6 +27,7 @@ func (g *sequentialIDs) NewID() uuid.UUID {
 type fakeRepo struct {
 	wallet     *wallet.Wallet
 	entries    []*wallet.LedgerEntry
+	outbox     []events.Envelope
 	byKey      map[string]*wagering.WagerTransaction
 	byExternal map[string]*wagering.WagerTransaction
 }
@@ -46,13 +49,14 @@ func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, deci
 	if found != nil && found.ID() != t.WalletID() {
 		found = nil
 	}
-	entry, err := decide(found)
+	entry, outbox, err := decide(found)
 	if err != nil {
 		return err
 	}
 	if entry != nil {
 		r.entries = append(r.entries, entry)
 	}
+	r.outbox = append(r.outbox, outbox...)
 	r.byKey[t.ProviderID()+"|"+t.IdempotencyKey()] = t
 	r.byExternal[t.ProviderID()+"|"+t.ExternalTransactionID()] = t
 	return nil
@@ -329,5 +333,68 @@ func TestSubmitRefusesOpeningAndUnhandledKinds(t *testing.T) {
 		if _, err := service.Submit(context.Background(), p); err == nil {
 			t.Errorf("Submit(%s) succeeded; only BET, WIN and LOSS are handled here", kind)
 		}
+	}
+}
+
+// §11: the outcome decides the events, and they are handed to the repository
+// for the commit that carries the movement (§5.4).
+func TestSubmitWritesTheEventsItsOutcomeOwes(t *testing.T) {
+	tests := map[string]struct {
+		balance string
+		kind    wagering.Kind
+		amount  string
+		want    []string
+	}{
+		"bet": {"100.00", wagering.KindBet, "25.00",
+			[]string{events.TypeWagerTransactionProcessed, events.TypeWalletBalanceChanged}},
+		"win": {"100.00", wagering.KindWin, "25.00",
+			[]string{events.TypeWagerTransactionProcessed, events.TypeWalletBalanceChanged}},
+		// §7: a LOSS produces WagerTransactionProcessed and no balance change.
+		"loss": {"100.00", wagering.KindLoss, "0.00",
+			[]string{events.TypeWagerTransactionProcessed}},
+		"rejection": {"10.00", wagering.KindBet, "25.00",
+			[]string{events.TypeWagerTransactionRejected}},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			service, repo, p := fixture(t, test.balance)
+			p.Kind, p.Money = test.kind, brl(t, test.amount)
+
+			result, err := service.Submit(context.Background(), p)
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+
+			var types []string
+			for _, e := range repo.outbox {
+				types = append(types, e.EventType)
+				if e.AggregateID != p.WalletID {
+					t.Errorf("%s aggregateId = %s, want the wallet", e.EventType, e.AggregateID)
+				}
+				if e.CorrelationID != result.Transaction.ID() {
+					t.Errorf("%s correlationId = %s, want the transaction's id", e.EventType, e.CorrelationID)
+				}
+			}
+			if !slices.Equal(types, test.want) {
+				t.Errorf("outbox = %v, want %v", types, test.want)
+			}
+		})
+	}
+}
+
+// A replay re-applies nothing, so it owes no second copy of the events (§9).
+func TestReplayWritesNoFurtherEvents(t *testing.T) {
+	service, repo, p := fixture(t, "100.00")
+	if _, err := service.Submit(context.Background(), p); err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	written := len(repo.outbox)
+
+	if _, err := service.Submit(context.Background(), p); err != nil {
+		t.Fatalf("replay Submit() error = %v", err)
+	}
+	if len(repo.outbox) != written {
+		t.Errorf("the replay wrote %d more events, want none", len(repo.outbox)-written)
 	}
 }

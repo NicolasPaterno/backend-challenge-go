@@ -15,6 +15,7 @@ import (
 	"uuid"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/app/walletapp"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/events"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
@@ -52,8 +53,8 @@ const (
 		FROM wallets WHERE id = $1`
 )
 
-// opening and entry are nil for a zero initial balance (§9).
-func (r *WalletRepository) Open(ctx context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry) error {
+// opening, entry and outbox are nil for a zero initial balance (§9).
+func (r *WalletRepository) Open(ctx context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry, outbox []events.Envelope) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, insertWallet,
 			w.ID(), w.PlayerID(), w.Currency().String(), w.Balance().Minor(), w.Version(), w.CreatedAt(), w.UpdatedAt())
@@ -86,7 +87,8 @@ func (r *WalletRepository) Open(ctx context.Context, w *wallet.Wallet, opening *
 		if err != nil {
 			return fmt.Errorf("insert ledger entry: %w", err)
 		}
-		return nil
+
+		return insertOutbox(ctx, tx, outbox)
 	})
 }
 
