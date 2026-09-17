@@ -22,6 +22,12 @@ type Config struct {
 	DBMaxConns        int32
 	DBMinConns        int32
 	LogLevel          string
+
+	// The two differ inside Compose: the host and the api container reach
+	// Keycloak under different names, and only the issuer is claimed by tokens.
+	OIDCIssuerURL    string
+	OIDCDiscoveryURL string
+	OIDCAudience     string
 }
 
 // Load reports every problem at once, so a misconfigured deployment is not
@@ -42,6 +48,16 @@ func Load() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		fail("DATABASE_URL is required")
 	}
+
+	cfg.OIDCIssuerURL = os.Getenv("OIDC_ISSUER_URL")
+	if cfg.OIDCIssuerURL == "" {
+		fail("OIDC_ISSUER_URL is required")
+	}
+	cfg.OIDCAudience = os.Getenv("OIDC_AUDIENCE")
+	if cfg.OIDCAudience == "" {
+		fail("OIDC_AUDIENCE is required")
+	}
+	cfg.OIDCDiscoveryURL = envOr("OIDC_DISCOVERY_URL", cfg.OIDCIssuerURL)
 
 	if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {
 		fail("HTTP_ADDR must be a host:port listen address, got %q", cfg.HTTPAddr)

@@ -9,16 +9,20 @@ import (
 )
 
 // setEnv clears every key the loader reads, so an ambient variable cannot make
-// a test pass or fail by accident.
+// a test pass or fail by accident, then fills the auth settings every case but
+// the auth ones takes for granted. A case that wants one missing sets it to "".
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 	for _, key := range []string{
 		"APP_ENV", "HTTP_ADDR", "LOG_LEVEL", "DATABASE_URL",
 		"HTTP_READ_HEADER_TIMEOUT", "SHUTDOWN_TIMEOUT", "STARTUP_TIMEOUT",
 		"DB_MAX_CONNS", "DB_MIN_CONNS",
+		"OIDC_ISSUER_URL", "OIDC_DISCOVERY_URL", "OIDC_AUDIENCE",
 	} {
 		t.Setenv(key, "")
 	}
+	t.Setenv("OIDC_ISSUER_URL", "http://localhost:8081/realms/wagering")
+	t.Setenv("OIDC_AUDIENCE", "wagering-api")
 	for key, value := range env {
 		t.Setenv(key, value)
 	}
@@ -44,17 +48,23 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.DBMaxConns != 10 || cfg.DBMinConns != 1 {
 		t.Errorf("pool bounds = (%d, %d), want (1, 10)", cfg.DBMinConns, cfg.DBMaxConns)
 	}
+	// The API is normally reachable under one name, so discovery follows the issuer.
+	if cfg.OIDCDiscoveryURL != cfg.OIDCIssuerURL {
+		t.Errorf("OIDCDiscoveryURL = %q, want it to default to the issuer %q",
+			cfg.OIDCDiscoveryURL, cfg.OIDCIssuerURL)
+	}
 }
 
 func TestLoadReadsOverrides(t *testing.T) {
 	setEnv(t, map[string]string{
-		"APP_ENV":          "production",
-		"HTTP_ADDR":        "127.0.0.1:9000",
-		"LOG_LEVEL":        "DEBUG",
-		"DATABASE_URL":     "postgres://localhost/db",
-		"SHUTDOWN_TIMEOUT": "42s",
-		"DB_MAX_CONNS":     "25",
-		"DB_MIN_CONNS":     "5",
+		"APP_ENV":            "production",
+		"HTTP_ADDR":          "127.0.0.1:9000",
+		"LOG_LEVEL":          "DEBUG",
+		"DATABASE_URL":       "postgres://localhost/db",
+		"SHUTDOWN_TIMEOUT":   "42s",
+		"DB_MAX_CONNS":       "25",
+		"DB_MIN_CONNS":       "5",
+		"OIDC_DISCOVERY_URL": "http://keycloak:8080/realms/wagering",
 	})
 
 	cfg, err := config.Load()
@@ -74,6 +84,9 @@ func TestLoadReadsOverrides(t *testing.T) {
 	if cfg.DBMaxConns != 25 || cfg.DBMinConns != 5 {
 		t.Errorf("pool bounds = (%d, %d), want (5, 25)", cfg.DBMinConns, cfg.DBMaxConns)
 	}
+	if cfg.OIDCDiscoveryURL != "http://keycloak:8080/realms/wagering" {
+		t.Errorf("OIDCDiscoveryURL = %q, want the override", cfg.OIDCDiscoveryURL)
+	}
 }
 
 func TestLoadRejectsInvalidEnvironment(t *testing.T) {
@@ -84,6 +97,20 @@ func TestLoadRejectsInvalidEnvironment(t *testing.T) {
 		"missing database url": {
 			env:  map[string]string{},
 			want: "DATABASE_URL is required",
+		},
+		"missing issuer": {
+			env: map[string]string{
+				"DATABASE_URL":    "postgres://localhost/db",
+				"OIDC_ISSUER_URL": "",
+			},
+			want: "OIDC_ISSUER_URL is required",
+		},
+		"missing audience": {
+			env: map[string]string{
+				"DATABASE_URL":  "postgres://localhost/db",
+				"OIDC_AUDIENCE": "",
+			},
+			want: "OIDC_AUDIENCE is required",
 		},
 		"unparseable duration": {
 			env: map[string]string{

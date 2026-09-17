@@ -19,6 +19,7 @@ func TestOpenAndReadWalletOverHTTP(t *testing.T) {
 	t.Setenv("DATABASE_URL", testsupport.PostgresMigrated(t))
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("LOG_LEVEL", "warn")
+	issuer := testsupport.KeycloakEnv(t)
 
 	var server *http.Server
 	fxApp := fxtest.New(t, options(), fx.Populate(&server))
@@ -26,12 +27,13 @@ func TestOpenAndReadWalletOverHTTP(t *testing.T) {
 	defer fxApp.RequireStop()
 
 	base := "http://" + server.Addr
+	client := testsupport.BearerClient(t, issuer, testsupport.InternalClient)
 	const playerID = "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1"
 	body := `{"playerId":"` + playerID + `","initialBalance":{"amount":"1000","currency":"BRL"}}`
 
 	post := func() *http.Response {
 		t.Helper()
-		resp, err := http.Post(base+"/wallets", "application/json", bytes.NewReader([]byte(body)))
+		resp, err := client.Post(base+"/wallets", "application/json", bytes.NewReader([]byte(body)))
 		if err != nil {
 			t.Fatalf("POST /wallets: %v", err)
 		}
@@ -71,7 +73,7 @@ func TestOpenAndReadWalletOverHTTP(t *testing.T) {
 		t.Errorf("conflict Content-Type = %q, want application/problem+json", got)
 	}
 
-	read, err := http.Get(base + "/wallets/" + opened.ID)
+	read, err := client.Get(base + "/wallets/" + opened.ID)
 	if err != nil {
 		t.Fatalf("GET /wallets/%s: %v", opened.ID, err)
 	}
@@ -80,7 +82,7 @@ func TestOpenAndReadWalletOverHTTP(t *testing.T) {
 		t.Fatalf("GET /wallets status = %d, want %d", read.StatusCode, http.StatusOK)
 	}
 
-	missing, err := http.Get(base + "/wallets/0192f291-27dd-7d3f-8071-5f8685deef37")
+	missing, err := client.Get(base + "/wallets/0192f291-27dd-7d3f-8071-5f8685deef37")
 	if err != nil {
 		t.Fatalf("GET unknown wallet: %v", err)
 	}

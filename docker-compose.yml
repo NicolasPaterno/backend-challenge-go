@@ -1,5 +1,4 @@
-# Local environment for the wagering service (§4).
-# Keycloak and LocalStack join in the auth and SQS stories.
+# LocalStack joins in the SQS story.
 
 services:
   postgres:
@@ -9,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wagering}
       POSTGRES_DB: ${POSTGRES_DB:-wagering}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +17,6 @@ services:
       timeout: 3s
       retries: 30
 
-  # One-shot: the API waits for it, so the schema is current before traffic.
   migrate:
     build:
       context: .
@@ -33,6 +31,30 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # KC_HOSTNAME fixes the issuer the tokens carry, so a token fetched from the
+  # host is the same token the api container verifies; the api still fetches the
+  # metadata over the Compose network via OIDC_DISCOVERY_URL.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/realm.json:/opt/keycloak/data/import/realm.json:ro
+    ports:
+      - "127.0.0.1:8081:8080"
+    # The image ships no curl; bash talks to the management port directly.
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost:localhost\\r\\nConnection:close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
   api:
     build:
       context: .
@@ -45,13 +67,18 @@ services:
       DB_MIN_CONNS: ${DB_MIN_CONNS:-1}
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-15s}
       STARTUP_TIMEOUT: ${STARTUP_TIMEOUT:-15s}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-http://localhost:8081/realms/wagering}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-http://keycloak:8080/realms/wagering}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-wagering-api}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health/live"]
       interval: 5s
