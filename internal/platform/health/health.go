@@ -1,5 +1,5 @@
 // Package health serves the public health checks (§9). Liveness must stay 200
-// while dependencies are degraded; readiness arrives with story 16.
+// while dependencies are degraded; readiness reports PostgreSQL and SQS.
 package health
 
 import (
@@ -20,4 +20,7 @@ func NewLiveRoute() httpserver.Route {
 	}
 }
 
-var Module = fx.Module("health", fx.Provide(httpserver.AsRoute(NewLiveRoute)))
+var Module = fx.Module("health", fx.Provide(
+	httpserver.AsRoute(NewLiveRoute),
+	httpserver.AsRoute(NewReadyRoute),
+))
