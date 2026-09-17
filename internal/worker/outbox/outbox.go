@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/config"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/correlation"
 )
 
 // Event is one outbox row on its way out. Payload is the envelope exactly as
@@ -120,10 +121,13 @@ func (w *Worker) run(ctx context.Context) {
 func (w *Worker) cycle(ctx context.Context) int {
 	ctx, cancel := context.WithTimeout(ctx, w.cfg.OutboxPublishWindow)
 	defer cancel()
+	// One id per cycle: a claim that fails is diagnosed from the lines that
+	// share it (§12).
+	ctx = correlation.NewContext(ctx, uuid.NewV7())
 
 	published, err := w.store.Drain(ctx, w.cfg.OutboxBatchSize, w.publisher.Publish)
 	if err != nil && ctx.Err() == nil {
-		w.logger.Error("outbox drain failed", slog.Any("error", err))
+		w.logger.ErrorContext(ctx, "outbox drain failed", slog.Any("error", err))
 	}
 	return published
 }

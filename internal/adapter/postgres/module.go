@@ -14,4 +14,5 @@ var Module = fx.Module("postgres-adapter",
 		fx.Annotate(NewWagerRepository, fx.As(new(wageringapp.Repository))),
 		fx.Annotate(NewOutboxStore, fx.As(new(outbox.Store))),
 	),
+	fx.Invoke(PublishOutboxLag),
 )

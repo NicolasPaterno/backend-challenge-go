@@ -17,6 +17,8 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/config"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/correlation"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/metrics"
 )
 
 // The queue's own maximum, so a poll costs one request whether it returns ten
@@ -37,7 +39,10 @@ type Submitter interface {
 type envelope struct {
 	MessageID string `json:"messageId"`
 	Type      string `json:"type"`
-	Data      struct {
+	// Optional: a producer that traces its own call can hand us its id, and
+	// otherwise one is generated (§12).
+	CorrelationID string `json:"correlationId"`
+	Data          struct {
 		ProviderID                     string      `json:"providerId"`
 		ExternalTransactionID          string      `json:"externalTransactionId"`
 		IdempotencyKey                 string      `json:"idempotencyKey"`
@@ -161,7 +166,8 @@ func (c *Consumer) handle(ctx context.Context, m types.Message) {
 	received := time.Now().UTC()
 	sqsID := derefString(m.MessageId)
 
-	params, err := decode(m)
+	params, correlationID, err := decode(m)
+	ctx, _ = correlation.Ensure(ctx, correlationID)
 	if err != nil {
 		// Nothing about this body will parse on the fourth attempt either, and
 		// there is no transaction to reject: it is an invalid message (04 §10).
@@ -170,7 +176,7 @@ func (c *Consumer) handle(ctx context.Context, m types.Message) {
 	}
 	params.Inbox.ReceivedAt = received
 
-	logger := c.logger.With(slog.String("message_id", params.Inbox.MessageID))
+	logger := c.logger.With(slog.String("messageId", params.Inbox.MessageID))
 
 	result, err := c.submit.Submit(ctx, params)
 	switch {
@@ -179,17 +185,18 @@ func (c *Consumer) handle(ctx context.Context, m types.Message) {
 		c.deadLetter(ctx, m, params.Inbox.MessageID, "message can never be handled", err)
 		return
 	default:
-		logger.Warn("handling failed, leaving the message for redelivery", slog.Any("error", err))
+		logger.WarnContext(ctx, "handling failed, leaving the message for redelivery", slog.Any("error", err))
 		return
 	}
 
 	// A rejection is a confirmed outcome and a pending reference is durably
 	// recorded, so both are done with the queue: 13's worker owns what is left
 	// (§6.5, §10).
-	logger.Info("message handled",
-		slog.String("transaction_id", result.Transaction.ID().String()),
+	logger.InfoContext(ctx, "message handled",
+		slog.String("transactionId", result.Transaction.ID().String()),
+		slog.String("walletId", result.Transaction.WalletID().String()),
 		slog.String("status", result.Transaction.Status().String()),
-		slog.Bool("idempotent_replay", result.Replay))
+		slog.Bool("idempotentReplay", result.Replay))
 
 	c.delete(ctx, m, logger)
 }
@@ -210,7 +217,7 @@ func permanent(err error) bool {
 // maxReceiveCount × VisibilityTimeout on retries that cannot succeed (§10).
 // The redrive policy stays as the backstop for everything else.
 func (c *Consumer) deadLetter(ctx context.Context, m types.Message, id, reason string, cause error) {
-	logger := c.logger.With(slog.String("message_id", id), slog.Any("error", cause))
+	logger := c.logger.With(slog.String("messageId", id), slog.Any("error", cause))
 
 	body := derefString(m.Body)
 	group := m.Attributes[string(types.MessageSystemAttributeNameMessageGroupId)]
@@ -224,12 +231,13 @@ func (c *Consumer) deadLetter(ctx context.Context, m types.Message, id, reason s
 		MessageDeduplicationId: &id,
 	}); err != nil {
 		// Left on the queue: the redrive policy will take it after its attempts.
-		logger.Error("could not dead-letter the message, leaving it to the redrive policy",
+		logger.ErrorContext(ctx, "could not dead-letter the message, leaving it to the redrive policy",
 			slog.Any("send_error", err))
 		return
 	}
 
-	logger.Error(reason + ", moved to the dead-letter queue")
+	metrics.DeadLettered.Add(1)
+	logger.ErrorContext(ctx, reason+", moved to the dead-letter queue")
 	c.delete(ctx, m, logger)
 }
 
@@ -238,31 +246,31 @@ func (c *Consumer) delete(ctx context.Context, m types.Message, logger *slog.Log
 		QueueUrl: &c.queueURL, ReceiptHandle: m.ReceiptHandle,
 	}); err != nil {
 		// The handling committed; the inbox makes the redelivery a no-op.
-		logger.Error("delete failed, the message will be redelivered", slog.Any("error", err))
+		logger.ErrorContext(ctx, "delete failed, the message will be redelivered", slog.Any("error", err))
 	}
 }
 
 // decode refuses what NewExternal could not have accepted anyway, so a message
 // missing a field never becomes a transaction there is no way to reject (04 §10).
-func decode(m types.Message) (wageringapp.SubmitParams, error) {
+func decode(m types.Message) (wageringapp.SubmitParams, string, error) {
 	var e envelope
 	if err := json.Unmarshal([]byte(derefString(m.Body)), &e); err != nil {
-		return wageringapp.SubmitParams{}, fmt.Errorf("decode body: %w", err)
+		return wageringapp.SubmitParams{}, "", fmt.Errorf("decode body: %w", err)
 	}
 	if e.MessageID == "" {
-		return wageringapp.SubmitParams{}, errors.New("messageId is required")
+		return wageringapp.SubmitParams{}, e.CorrelationID, errors.New("messageId is required")
 	}
 
 	playerID, err := uuid.Parse(e.Data.PlayerID)
 	if err != nil {
-		return wageringapp.SubmitParams{}, fmt.Errorf("playerId: %w", err)
+		return wageringapp.SubmitParams{}, e.CorrelationID, fmt.Errorf("playerId: %w", err)
 	}
 	walletID, err := uuid.Parse(e.Data.WalletID)
 	if err != nil {
-		return wageringapp.SubmitParams{}, fmt.Errorf("walletId: %w", err)
+		return wageringapp.SubmitParams{}, e.CorrelationID, fmt.Errorf("walletId: %w", err)
 	}
 	if e.Data.IdempotencyKey == "" {
-		return wageringapp.SubmitParams{}, errors.New("idempotencyKey is required")
+		return wageringapp.SubmitParams{}, e.CorrelationID, errors.New("idempotencyKey is required")
 	}
 
 	return wageringapp.SubmitParams{
@@ -277,7 +285,7 @@ func decode(m types.Message) (wageringapp.SubmitParams, error) {
 		Money:                          e.Data.Money,
 		ReferenceExternalTransactionID: e.Data.ReferenceExternalTransactionID,
 		Inbox:                          wageringapp.Inbox{MessageID: e.MessageID},
-	}, nil
+	}, e.CorrelationID, nil
 }
 
 func derefString(s *string) string {

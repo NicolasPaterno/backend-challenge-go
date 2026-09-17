@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"go.uber.org/fx"
+	"uuid"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/config"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/correlation"
 )
 
 // Resolver re-runs the records whose wait has come round and reports how many
@@ -103,9 +105,12 @@ func (w *Worker) run(ctx context.Context) {
 }
 
 func (w *Worker) cycle(ctx context.Context) int {
+	// One id per cycle, so the lines of one sweep can be read together (§12).
+	ctx = correlation.NewContext(ctx, uuid.NewV7())
+
 	resolved, err := w.resolver.ResolveDue(ctx, w.cfg.ReferenceBatchSize)
 	if err != nil && ctx.Err() == nil {
-		w.logger.Error("reference resolution failed", slog.Any("error", err))
+		w.logger.ErrorContext(ctx, "reference resolution failed", slog.Any("error", err))
 	}
 	return resolved
 }

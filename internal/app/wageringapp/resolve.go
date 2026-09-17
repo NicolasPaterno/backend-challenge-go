@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/metrics"
 )
 
 // ResolveDue re-runs the reversals whose wait has come round, one SQL
@@ -19,13 +20,15 @@ func (s *Service) ResolveDue(ctx context.Context, limit int) (int, error) {
 		return 0, err
 	}
 
+	metrics.ReferenceRetries.Add(int64(len(due)))
+
 	var (
 		resolved int
 		errs     []error
 	)
 	for _, id := range due {
 		now := s.now()
-		resume := func(t *wagering.WagerTransaction) Decide { return s.decide(t, now) }
+		resume := func(t *wagering.WagerTransaction) Decide { return s.decide(ctx, t, now) }
 		if err := s.repo.Resume(ctx, id, resume); err != nil {
 			errs = append(errs, fmt.Errorf("resume %s: %w", id, err))
 			continue

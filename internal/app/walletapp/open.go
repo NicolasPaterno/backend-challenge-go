@@ -14,6 +14,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/correlation"
 )
 
 var (
@@ -96,11 +97,12 @@ func (s *Service) Open(ctx context.Context, p OpenParams) (*wallet.Wallet, error
 		return nil, err
 	}
 
-	// The OPENING's id stands in as correlationId while nothing carries one
-	// (A.1); 16 replaces it with the request's.
+	// The request's correlation id, falling back to the OPENING's own when the
+	// wallet is opened by something that carries none (A.1).
+	correlationID := correlation.Or(ctx, openingID)
 	outbox := []events.Envelope{
-		events.NewWagerTransactionProcessed(s.ids.NewID(), openingID, opening, now),
-		events.NewWalletBalanceChanged(s.ids.NewID(), openingID, entry, w.Version(), now),
+		events.NewWagerTransactionProcessed(s.ids.NewID(), correlationID, opening, now),
+		events.NewWalletBalanceChanged(s.ids.NewID(), correlationID, entry, w.Version(), now),
 	}
 
 	if err := s.repo.Open(ctx, w, opening, entry, outbox); err != nil {

@@ -3,7 +3,11 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"expvar"
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -112,4 +116,39 @@ func (s *OutboxStore) Drain(ctx context.Context, limit int, publish func(context
 		return published, err
 	}
 	return published, sendErr
+}
+
+// §12's outbox lag: the age of the oldest event still waiting. Published as a
+// function rather than kept up to date by the publisher, so it is measured from
+// the table — the one place a stalled or dead publisher still shows up.
+const selectOutboxLag = `
+	SELECT COALESCE(EXTRACT(EPOCH FROM now() - MIN(occurred_at)), 0)::bigint
+	FROM outbox_events WHERE published_at IS NULL`
+
+// The pool is swapped rather than captured, because expvar.Publish panics on a
+// second registration of the same name and the tests build the application many
+// times in one process.
+var lagPool atomic.Pointer[pgxpool.Pool]
+
+var publishLagOnce = sync.OnceFunc(func() {
+	expvar.Publish("outbox_lag_seconds", expvar.Func(func() any {
+		pool := lagPool.Load()
+		if pool == nil {
+			return nil
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		var seconds int64
+		if err := pool.QueryRow(ctx, selectOutboxLag).Scan(&seconds); err != nil {
+			return nil
+		}
+		return seconds
+	}))
+})
+
+func PublishOutboxLag(pool *pgxpool.Pool) {
+	lagPool.Store(pool)
+	publishLagOnce()
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/health"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/httpserver"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/logging"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/metrics"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/postgres"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/worker/outbox"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/worker/reference"
@@ -27,6 +28,7 @@ func options() fx.Option {
 		postgres.Module,
 		httpserver.Module,
 		health.Module,
+		metrics.Module,
 		pgadapter.Module,
 		walletapp.Module,
 		wageringapp.Module,

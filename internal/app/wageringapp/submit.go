@@ -14,6 +14,8 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/correlation"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/metrics"
 )
 
 var (
@@ -148,6 +150,9 @@ type Result struct {
 }
 
 func (s *Service) Submit(ctx context.Context, p SubmitParams) (Result, error) {
+	start := time.Now()
+	defer func() { metrics.ObserveProcessing(time.Since(start)) }()
+
 	now := s.now()
 	hash := PayloadHash(p)
 
@@ -172,14 +177,18 @@ func (s *Service) Submit(ctx context.Context, p SubmitParams) (Result, error) {
 
 	// No pre-read: the unique violation is the only duplicate check that also
 	// holds against a submission racing this one in another process.
-	err = s.repo.Process(ctx, t, p.Inbox, s.decide(t, now))
+	err = s.repo.Process(ctx, t, p.Inbox, s.decide(ctx, t, now))
 	switch {
 	case err == nil:
+		metrics.Outcomes.Add(t.Status().String(), 1)
 		return Result{Transaction: t}, nil
 	case errors.Is(err, ErrDuplicateMessage):
 		return s.replayMessage(ctx, p, hash)
 	case errors.Is(err, ErrDuplicate):
 		return s.replay(ctx, p, hash)
+	case errors.Is(err, ErrWalletBusy), errors.Is(err, ErrConcurrentUpdate):
+		metrics.ConcurrencyConflicts.Add(1)
+		return Result{}, err
 	default:
 		return Result{}, err
 	}
@@ -212,35 +221,36 @@ func (s *Service) replay(ctx context.Context, p SubmitParams, hash string) (Resu
 	case stored.PayloadHash() != hash:
 		return Result{}, ErrPayloadConflict
 	}
+	metrics.Duplicates.Add(1)
 	return Result{Transaction: stored, Replay: true}, nil
 }
 
 // The balance reported here is the one a replay returns, even after later
 // movements (§9).
-func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
+func (s *Service) decide(ctx context.Context, t *wagering.WagerTransaction, now time.Time) Decide {
 	return func(w *wallet.Wallet, ref *Reference) (*wallet.LedgerEntry, []events.Envelope, error) {
 		// One code for "no such wallet" and "not this player's wallet": telling
 		// them apart would enumerate wallets (§2). Neither has a balance to
 		// report, so the rejection carries the zero Money (04 §7).
 		if w == nil || w.PlayerID() != t.PlayerID() {
-			return s.reject(t, wagering.FailureWalletNotFound, money.Money{}, now)
+			return s.reject(ctx, t, wagering.FailureWalletNotFound, money.Money{}, now)
 		}
 		if w.Currency() != t.Amount().Currency() {
-			return s.reject(t, wagering.FailureCurrencyMismatch, w.Balance(), now)
+			return s.reject(ctx, t, wagering.FailureCurrencyMismatch, w.Balance(), now)
 		}
 
 		switch t.Kind() {
 		case wagering.KindBet:
 			entry, err := w.Debit(s.ids.NewID(), t.ID(), t.Amount(), now)
-			return s.settle(t, w, entry, err, wagering.FailureInsufficientFunds, now)
+			return s.settle(ctx, t, w, entry, err, wagering.FailureInsufficientFunds, now)
 		case wagering.KindWin:
 			entry, err := w.Credit(s.ids.NewID(), t.ID(), t.Amount(), now)
-			return s.settle(t, w, entry, err, wagering.FailureInsufficientFunds, now)
+			return s.settle(ctx, t, w, entry, err, wagering.FailureInsufficientFunds, now)
 		case wagering.KindLoss:
 			// §7: no movement — the money already left on the BET.
-			return s.settle(t, w, nil, nil, "", now)
+			return s.settle(ctx, t, w, nil, nil, "", now)
 		case wagering.KindRefund, wagering.KindRollback:
-			return s.reverse(t, w, ref, now)
+			return s.reverse(ctx, t, w, ref, now)
 		}
 		return nil, nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
 	}
@@ -248,7 +258,7 @@ func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
 
 // reverse applies §7's reversal rules against the resolved reference. Checks
 // run before the movement, so a refused reversal leaves the wallet untouched.
-func (s *Service) reverse(t *wagering.WagerTransaction, w *wallet.Wallet, ref *Reference, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
+func (s *Service) reverse(ctx context.Context, t *wagering.WagerTransaction, w *wallet.Wallet, ref *Reference, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
 	// Absent, or present but not finished: both are references that are not
 	// available yet, which §7 waits for rather than refuses (A.8.2).
 	if ref == nil || !ref.Transaction.Status().IsTerminal() {
@@ -257,7 +267,7 @@ func (s *Service) reverse(t *wagering.WagerTransaction, w *wallet.Wallet, ref *R
 		// reference-not-found code, and otherwise the caller backs it off.
 		if t.Status() == wagering.StatusPendingReference {
 			if t.ReferenceExpired(now) {
-				return s.reject(t, wagering.FailureReferenceNotFound, w.Balance(), now)
+				return s.reject(ctx, t, wagering.FailureReferenceNotFound, w.Balance(), now)
 			}
 			return nil, nil, nil
 		}
@@ -269,7 +279,7 @@ func (s *Service) reverse(t *wagering.WagerTransaction, w *wallet.Wallet, ref *R
 		if err := t.MarkPendingReference(now.Add(time.Duration(s.referenceTTL)), now); err != nil {
 			return nil, nil, err
 		}
-		return nil, s.outbox(t, nil, 0, now), nil
+		return nil, s.outbox(ctx, t, nil, 0, now), nil
 	}
 
 	r := ref.Transaction
@@ -280,16 +290,16 @@ func (s *Service) reverse(t *wagering.WagerTransaction, w *wallet.Wallet, ref *R
 	direction, reversible := reversalDirection(t.Kind(), r.Kind())
 	switch {
 	case r.Status() != wagering.StatusProcessed:
-		return s.reject(t, wagering.FailureReferenceNotProcessed, w.Balance(), now)
+		return s.reject(ctx, t, wagering.FailureReferenceNotProcessed, w.Balance(), now)
 	case !reversible || !agrees(t, r):
-		return s.reject(t, wagering.FailureReferenceMismatch, w.Balance(), now)
+		return s.reject(ctx, t, wagering.FailureReferenceMismatch, w.Balance(), now)
 	case ref.Reversed:
-		return s.reject(t, wagering.FailureReferenceAlreadyReversed, w.Balance(), now)
+		return s.reject(ctx, t, wagering.FailureReferenceAlreadyReversed, w.Balance(), now)
 	}
 	// By value, never by the text received: "25" and "25.00" are one amount
 	// (A.3.1). The currencies already agree, so Cmp cannot error.
 	if cmp, _ := t.Amount().Cmp(r.Amount()); cmp != 0 {
-		return s.reject(t, wagering.FailureReferenceAmount, w.Balance(), now)
+		return s.reject(ctx, t, wagering.FailureReferenceAmount, w.Balance(), now)
 	}
 
 	var (
@@ -301,7 +311,7 @@ func (s *Service) reverse(t *wagering.WagerTransaction, w *wallet.Wallet, ref *R
 	} else {
 		entry, err = w.Credit(s.ids.NewID(), t.ID(), t.Amount(), now)
 	}
-	return s.settle(t, w, entry, err, wagering.FailureReversalExceedsBalance, now)
+	return s.settle(ctx, t, w, entry, err, wagering.FailureReversalExceedsBalance, now)
 }
 
 // §7's reversal table. A REFUND returns a BET; a ROLLBACK undoes a processed
@@ -329,43 +339,45 @@ func agrees(t, r *wagering.WagerTransaction) bool {
 // settle turns the movement's outcome into the transaction's own. overdrawn is
 // the code for a refused debit, which §7 requires differ between a bet and a
 // reversal.
-func (s *Service) settle(t *wagering.WagerTransaction, w *wallet.Wallet, entry *wallet.LedgerEntry, err error, overdrawn wagering.FailureCode, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
+func (s *Service) settle(ctx context.Context, t *wagering.WagerTransaction, w *wallet.Wallet, entry *wallet.LedgerEntry, err error, overdrawn wagering.FailureCode, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
 	switch {
 	case errors.Is(err, wallet.ErrInsufficientFunds):
-		return s.reject(t, overdrawn, w.Balance(), now)
+		return s.reject(ctx, t, overdrawn, w.Balance(), now)
 	case err != nil:
 		return nil, nil, err
 	}
 	if err := t.MarkProcessed(w.Balance(), now); err != nil {
 		return nil, nil, err
 	}
-	return entry, s.outbox(t, entry, w.Version(), now), nil
+	return entry, s.outbox(ctx, t, entry, w.Version(), now), nil
 }
 
-func (s *Service) reject(t *wagering.WagerTransaction, code wagering.FailureCode, balance money.Money, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
+func (s *Service) reject(ctx context.Context, t *wagering.WagerTransaction, code wagering.FailureCode, balance money.Money, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
 	if err := t.Reject(code, balance, now); err != nil {
 		return nil, nil, err
 	}
-	return nil, s.outbox(t, nil, 0, now), nil
+	return nil, s.outbox(ctx, t, nil, 0, now), nil
 }
 
 // The events an outcome owes (§11). entry is nil when no money moved, which is
 // what makes a LOSS produce WagerTransactionProcessed and no
 // WalletBalanceChanged (§7).
 //
-// The transaction's id stands in as correlationId while nothing carries one;
-// 16 replaces it with the request's or the message's.
-func (s *Service) outbox(t *wagering.WagerTransaction, entry *wallet.LedgerEntry, walletVersion int64, now time.Time) []events.Envelope {
+// correlationId is the request's or the message's, falling back to the
+// transaction's own identity when a worker resumed it (§12).
+func (s *Service) outbox(ctx context.Context, t *wagering.WagerTransaction, entry *wallet.LedgerEntry, walletVersion int64, now time.Time) []events.Envelope {
+	correlationID := correlation.Or(ctx, t.ID())
+
 	switch t.Status() {
 	case wagering.StatusRejected:
-		return []events.Envelope{events.NewWagerTransactionRejected(s.ids.NewID(), t.ID(), t, now)}
+		return []events.Envelope{events.NewWagerTransactionRejected(s.ids.NewID(), correlationID, t, now)}
 	case wagering.StatusPendingReference:
-		return []events.Envelope{events.NewWagerTransactionPendingReference(s.ids.NewID(), t.ID(), t, now)}
+		return []events.Envelope{events.NewWagerTransactionPendingReference(s.ids.NewID(), correlationID, t, now)}
 	}
 
-	outbox := []events.Envelope{events.NewWagerTransactionProcessed(s.ids.NewID(), t.ID(), t, now)}
+	outbox := []events.Envelope{events.NewWagerTransactionProcessed(s.ids.NewID(), correlationID, t, now)}
 	if entry != nil {
-		outbox = append(outbox, events.NewWalletBalanceChanged(s.ids.NewID(), t.ID(), entry, walletVersion, now))
+		outbox = append(outbox, events.NewWalletBalanceChanged(s.ids.NewID(), correlationID, entry, walletVersion, now))
 	}
 	return outbox
 }

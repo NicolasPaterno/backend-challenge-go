@@ -90,6 +90,13 @@ func (h *WageringHandler) submit(w http.ResponseWriter, r *http.Request) {
 	result, err := h.wagering.Submit(r.Context(), params)
 	switch {
 	case err == nil:
+		// The identifiers §12 asks for; the amounts stay out of the log.
+		h.logger.InfoContext(r.Context(), "wager transaction handled",
+			slog.String("providerId", params.ProviderID),
+			slog.String("walletId", params.WalletID.String()),
+			slog.String("transactionId", result.Transaction.ID().String()),
+			slog.String("status", result.Transaction.Status().String()),
+			slog.Bool("idempotentReplay", result.Replay))
 		h.writeOutcome(w, result)
 	case errors.Is(err, wageringapp.ErrPayloadConflict):
 		writeProblem(w, http.StatusConflict, CodeIdempotencyKeyConflict,
