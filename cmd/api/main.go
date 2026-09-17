@@ -36,7 +36,10 @@ func options() fx.Option {
 		reference.Module,
 		// The worker's port is bound here rather than in either package: the app
 		// layer must not import a worker, and the worker must not import the app.
-		fx.Provide(func(s *wageringapp.Service) reference.Resolver { return s }),
+		fx.Provide(
+			func(s *wageringapp.Service) reference.Resolver { return s },
+			func(s *wageringapp.Service) sqs.Submitter { return s },
+		),
 		fx.WithLogger(logging.FxLogger),
 	)
 }

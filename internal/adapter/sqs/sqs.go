@@ -1,4 +1,5 @@
-// Package sqs publishes outbox events to the outbound queue.
+// Package sqs carries both directions of §10 and §11: the publisher that sends
+// outbox events out, and the consumer that brings wager operations in.
 package sqs
 
 import (
@@ -60,5 +61,7 @@ var Module = fx.Module("sqs-adapter",
 	fx.Provide(
 		NewClient,
 		fx.Annotate(NewPublisher, fx.As(new(outbox.Publisher))),
+		NewConsumer,
 	),
+	fx.Invoke(func(*Consumer) {}),
 )
