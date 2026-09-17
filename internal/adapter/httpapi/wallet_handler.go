@@ -120,8 +120,6 @@ func (h *WalletHandler) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newWalletResponse(found))
 }
 
-// The cause is logged, never returned: §12 forbids leaking internals to callers.
 func (h *WalletHandler) fail(w http.ResponseWriter, r *http.Request, operation string, err error) {
-	h.logger.ErrorContext(r.Context(), operation+" failed", slog.Any("error", err))
-	writeProblem(w, http.StatusInternalServerError, CodeInternalError, "the request could not be completed")
+	failInternal(h.logger, w, r, operation, err)
 }

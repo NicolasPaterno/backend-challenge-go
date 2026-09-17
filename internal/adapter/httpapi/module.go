@@ -9,9 +9,13 @@ import (
 var Module = fx.Module("http-adapter",
 	fx.Provide(
 		NewWalletHandler,
+		NewWageringHandler,
 		NewGuard,
 		httpserver.AsRoute(NewOpenWalletRoute),
 		httpserver.AsRoute(NewGetWalletRoute),
 		httpserver.AsRoute(NewGetWalletLedgerRoute),
+		httpserver.AsRoute(NewSubmitTransactionRoute),
+		httpserver.AsRoute(NewGetTransactionRoute),
+		httpserver.AsRoute(NewGetProviderTransactionRoute),
 	),
 )
