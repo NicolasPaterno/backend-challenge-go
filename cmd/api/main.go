@@ -16,6 +16,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/logging"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/postgres"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/worker/outbox"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/worker/reference"
 )
 
 func options() fx.Option {
@@ -32,6 +33,10 @@ func options() fx.Option {
 		httpapi.Module,
 		sqs.Module,
 		outbox.Module,
+		reference.Module,
+		// The worker's port is bound here rather than in either package: the app
+		// layer must not import a worker, and the worker must not import the app.
+		fx.Provide(func(s *wageringapp.Service) reference.Resolver { return s }),
 		fx.WithLogger(logging.FxLogger),
 	)
 }
