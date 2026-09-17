@@ -95,6 +95,7 @@ type bet struct {
 	amount     string
 	kind       string
 	currency   string
+	round      string
 	reference  string
 	client     *http.Client
 }
@@ -108,11 +109,14 @@ func (w *wagering) bet(b bet) betResult {
 	if b.currency == "" {
 		b.currency = "BRL"
 	}
+	if b.round == "" {
+		b.round = "round-987"
+	}
 
 	request := fmt.Sprintf(`{"providerId":"provider-a","externalTransactionId":%q,"playerId":%q,`+
-		`"walletId":%q,"roundId":"round-987","gameId":"fortune-chimp","kind":%q,`+
+		`"walletId":%q,"roundId":%q,"gameId":"fortune-chimp","kind":%q,`+
 		`"money":{"amount":%q,"currency":%q},"referenceExternalTransactionId":%q}`,
-		b.externalID, b.playerID, b.walletID, b.kind, b.amount, b.currency, b.reference)
+		b.externalID, b.playerID, b.walletID, b.round, b.kind, b.amount, b.currency, b.reference)
 
 	post, err := http.NewRequest(http.MethodPost, w.base+"/wagering/transactions", strings.NewReader(request))
 	if err != nil {
@@ -648,25 +652,6 @@ func TestLossAmountPolicy(t *testing.T) {
 
 	if balance, _ := api.wallet(walletID); balance != "100.00" {
 		t.Errorf("balance = %s, want 100.00; no LOSS moves money", balance)
-	}
-}
-
-func TestReversalsAreNotSupportedYet(t *testing.T) {
-	api := startWagering(t)
-	playerID := uuid.NewV7().String()
-	walletID := api.openWallet(playerID, "100.00")
-
-	for _, kind := range []string{"REFUND", "ROLLBACK"} {
-		t.Run(kind, func(t *testing.T) {
-			refused := api.bet(bet{
-				externalID: "transaction-" + kind, key: "provider-a:transaction-" + kind,
-				playerID: playerID, walletID: walletID, amount: "25.00",
-				kind: kind, reference: "transaction-123",
-			})
-			if refused.Status != http.StatusBadRequest {
-				t.Errorf("status = %d, want %d (%+v)", refused.Status, http.StatusBadRequest, refused)
-			}
-		})
 	}
 }
 
