@@ -23,6 +23,7 @@ var (
 	ErrPayloadConflict    = errors.New("wageringapp: the idempotency key was reused with different content")
 	ErrExternalIDConflict = errors.New("wageringapp: the operation was already submitted under another idempotency key")
 	ErrConcurrentUpdate   = errors.New("wageringapp: the wallet changed under the update")
+	ErrWalletBusy         = errors.New("wageringapp: the wallet is held by another writer")
 	ErrNotFound           = errors.New("wageringapp: transaction not found")
 	ErrUnsupportedKind    = errors.New("wageringapp: kind is not handled yet")
 )

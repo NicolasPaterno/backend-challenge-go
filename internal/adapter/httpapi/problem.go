@@ -135,12 +135,15 @@ func writeRejection(w http.ResponseWriter, status int, t *wagering.WagerTransact
 func writeUnavailableOrInternal(w http.ResponseWriter, err error) {
 	var retryable interface{ SafeToRetry() bool }
 	if errors.As(err, &retryable) && retryable.SafeToRetry() {
-		w.Header().Set("Retry-After", "1")
-		writeProblem(w, http.StatusServiceUnavailable, CodeUnavailable,
-			"the service could not reach a dependency; the request was not applied")
+		writeUnavailable(w, "the service could not reach a dependency; the request was not applied")
 		return
 	}
 	writeProblem(w, http.StatusInternalServerError, CodeInternalError, "the request could not be completed")
+}
+
+func writeUnavailable(w http.ResponseWriter, detail string) {
+	w.Header().Set("Retry-After", "1")
+	writeProblem(w, http.StatusServiceUnavailable, CodeUnavailable, detail)
 }
 
 // The cause is logged, never returned: §12 forbids leaking internals to callers.

@@ -51,7 +51,10 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 		// A wallet that does not exist is handed to decide as nil: the rejection
 		// it produces is recorded like any other (§11).
 		w, err := scanWallet(tx.QueryRow(ctx, lockWallet, t.WalletID()), t.WalletID())
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		switch {
+		case isLockNotAvailable(err):
+			return wageringapp.ErrWalletBusy
+		case err != nil && !errors.Is(err, pgx.ErrNoRows):
 			return err
 		}
 

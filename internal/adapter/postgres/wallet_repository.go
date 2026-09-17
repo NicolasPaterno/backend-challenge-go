@@ -127,8 +127,18 @@ func scanWallet(row pgx.Row, id uuid.UUID) (*wallet.Wallet, error) {
 }
 
 func isUniqueViolation(err error) bool {
+	return hasCode(err, pgerrcode.UniqueViolation)
+}
+
+// The wallet is held by another writer for longer than DB_LOCK_TIMEOUT. Nothing
+// was applied, so the caller may retry (§8).
+func isLockNotAvailable(err error) bool {
+	return hasCode(err, pgerrcode.LockNotAvailable)
+}
+
+func hasCode(err error, code string) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
+	return errors.As(err, &pgErr) && pgErr.Code == code
 }
 
 const selectLedger = `

@@ -21,6 +21,7 @@ type Config struct {
 	DatabaseURL       string
 	DBMaxConns        int32
 	DBMinConns        int32
+	DBLockTimeout     time.Duration
 	LogLevel          string
 
 	// The two differ inside Compose: the host and the api container reach
@@ -73,6 +74,10 @@ func Load() (Config, error) {
 	cfg.ShutdownTimeout, shutdownErr = durationEnv("SHUTDOWN_TIMEOUT", 15*time.Second)
 	cfg.StartupTimeout, startupErr = durationEnv("STARTUP_TIMEOUT", 15*time.Second)
 	errs = append(errs, readHeaderErr, shutdownErr, startupErr)
+
+	var lockTimeoutErr error
+	cfg.DBLockTimeout, lockTimeoutErr = durationEnv("DB_LOCK_TIMEOUT", 3*time.Second)
+	errs = append(errs, lockTimeoutErr)
 
 	maxConns, maxErr := intEnv("DB_MAX_CONNS", 10, 1)
 	minConns, minErr := intEnv("DB_MIN_CONNS", 1, 0)

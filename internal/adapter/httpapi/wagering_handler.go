@@ -98,6 +98,8 @@ func (h *WageringHandler) submit(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, wageringapp.ErrExternalIDConflict):
 		writeProblem(w, http.StatusConflict, CodeExternalTransactionConflict,
 			"this externalTransactionId was already submitted under another Idempotency-Key")
+	case errors.Is(err, wageringapp.ErrWalletBusy):
+		writeUnavailable(w, "the wallet is busy; the operation was not applied")
 	case errors.Is(err, wageringapp.ErrUnsupportedKind), isConstructorRefusal(err):
 		writeProblem(w, http.StatusBadRequest, CodeValidationFailed, "the request has invalid fields",
 			kindViolation(err))

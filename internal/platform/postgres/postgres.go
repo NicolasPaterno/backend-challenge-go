@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
@@ -19,6 +20,14 @@ func NewPool(lc fx.Lifecycle, cfg config.Config, logger *slog.Logger) (*pgxpool.
 	}
 	poolCfg.MaxConns = cfg.DBMaxConns
 	poolCfg.MinConns = cfg.DBMinConns
+
+	// A wallet under contention queues on its row lock (§8). Without a bound,
+	// that queue is only ever cut short by the caller giving up, holding a pool
+	// connection the whole time; with one, the wallet answers 503 and the
+	// provider retries. It is deliberately longer than a transaction on an
+	// uncontended wallet, so it fires on pathology, not on load.
+	poolCfg.ConnConfig.RuntimeParams["lock_timeout"] =
+		strconv.FormatInt(cfg.DBLockTimeout.Milliseconds(), 10)
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {

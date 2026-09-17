@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"uuid"
 
+	"github.com/jackc/pgx/v5"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
 
@@ -19,16 +21,18 @@ import (
 )
 
 type wagering struct {
-	t        *testing.T
-	base     string
-	internal *http.Client
-	provider *http.Client
+	t           *testing.T
+	base        string
+	databaseURL string
+	internal    *http.Client
+	provider    *http.Client
 }
 
 func startWagering(t *testing.T) *wagering {
 	t.Helper()
 
-	t.Setenv("DATABASE_URL", testsupport.PostgresMigrated(t))
+	databaseURL := testsupport.PostgresMigrated(t)
+	t.Setenv("DATABASE_URL", databaseURL)
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("LOG_LEVEL", "error")
 	issuer := testsupport.KeycloakEnv(t)
@@ -39,10 +43,11 @@ func startWagering(t *testing.T) *wagering {
 	t.Cleanup(app.RequireStop)
 
 	return &wagering{
-		t:        t,
-		base:     "http://" + server.Addr,
-		internal: testsupport.BearerClient(t, issuer, testsupport.InternalClient),
-		provider: testsupport.BearerClient(t, issuer, testsupport.ProviderAClient),
+		t:           t,
+		base:        "http://" + server.Addr,
+		databaseURL: databaseURL,
+		internal:    testsupport.BearerClient(t, issuer, testsupport.InternalClient),
+		provider:    testsupport.BearerClient(t, issuer, testsupport.ProviderAClient),
 	}
 }
 
@@ -395,6 +400,53 @@ func TestBetAgainstAnUnknownWalletIsRecorded(t *testing.T) {
 
 	if replay := api.bet(submitted); !replay.IdempotentReplay {
 		t.Error("the resubmission did not report idempotentReplay")
+	}
+}
+
+// §8: a wallet held past DB_LOCK_TIMEOUT answers 503 rather than queueing until
+// the caller gives up.
+func TestAContendedWalletIsRefusedNotQueued(t *testing.T) {
+	t.Setenv("DB_LOCK_TIMEOUT", "300ms")
+	api := startWagering(t)
+	playerID := uuid.NewV7().String()
+	walletID := api.openWallet(playerID, "100.00")
+
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, api.databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	held, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer held.Rollback(ctx)
+	if _, err := held.Exec(ctx, "SELECT 1 FROM wallets WHERE id = $1 FOR UPDATE", walletID); err != nil {
+		t.Fatalf("hold the wallet: %v", err)
+	}
+
+	refused := api.bet(bet{
+		externalID: "transaction-1", key: "provider-a:transaction-1",
+		playerID: playerID, walletID: walletID, amount: "25.00",
+	})
+	if refused.Status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d (%+v)", refused.Status, http.StatusServiceUnavailable, refused)
+	}
+
+	if err := held.Rollback(ctx); err != nil {
+		t.Fatalf("release the wallet: %v", err)
+	}
+	applied := api.bet(bet{
+		externalID: "transaction-1", key: "provider-a:transaction-1",
+		playerID: playerID, walletID: walletID, amount: "25.00",
+	})
+	if applied.Status != http.StatusOK || applied.IdempotentReplay {
+		t.Fatalf("the retry did not apply the operation: %+v", applied)
+	}
+	if got := api.balance(walletID); got != "75.00" {
+		t.Errorf("balance = %s, want 75.00", got)
 	}
 }
 
