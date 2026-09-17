@@ -24,6 +24,7 @@ func (g *sequentialIDs) NewID() uuid.UUID {
 // real guarantees are exercised against PostgreSQL in cmd/api.
 type fakeRepo struct {
 	wallet     *wallet.Wallet
+	entries    []*wallet.LedgerEntry
 	byKey      map[string]*wagering.WagerTransaction
 	byExternal map[string]*wagering.WagerTransaction
 }
@@ -45,8 +46,12 @@ func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, deci
 	if found != nil && found.ID() != t.WalletID() {
 		found = nil
 	}
-	if _, err := decide(found); err != nil {
+	entry, err := decide(found)
+	if err != nil {
 		return err
+	}
+	if entry != nil {
+		r.entries = append(r.entries, entry)
 	}
 	r.byKey[t.ProviderID()+"|"+t.IdempotencyKey()] = t
 	r.byExternal[t.ProviderID()+"|"+t.ExternalTransactionID()] = t
@@ -235,13 +240,94 @@ func TestSubmitRecordsWalletNotFound(t *testing.T) {
 	}
 }
 
+func TestSubmitCreditsAWin(t *testing.T) {
+	service, repo, p := fixture(t, "100.00")
+	p.Kind = wagering.KindWin
+	p.ReferenceExternalTransactionID = "bet-of-the-round"
+
+	result, err := service.Submit(context.Background(), p)
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if result.Transaction.Status() != wagering.StatusProcessed {
+		t.Fatalf("status = %s, want PROCESSED", result.Transaction.Status())
+	}
+	if got := result.Transaction.ResultBalance().String(); got != "125.00 BRL" {
+		t.Errorf("resultBalance = %s, want 125.00 BRL", got)
+	}
+	if got := repo.wallet.Balance().String(); got != "125.00 BRL" {
+		t.Errorf("balance = %s, want 125.00 BRL", got)
+	}
+	if repo.wallet.Version() != 2 {
+		t.Errorf("version = %d, want 2", repo.wallet.Version())
+	}
+	if len(repo.entries) != 1 {
+		t.Fatalf("ledger entries = %d, want 1", len(repo.entries))
+	}
+	if got := repo.entries[0].Direction(); got != wallet.DirectionCredit {
+		t.Errorf("direction = %s, want CREDIT", got)
+	}
+	if result.Transaction.ReferenceExternalTransactionID() != "bet-of-the-round" {
+		t.Error("the WIN's reference was not recorded")
+	}
+	if result.Transaction.ReferenceTransactionID() != uuid.Nil() {
+		t.Error("the WIN's reference was resolved; 09 only records it (A.4)")
+	}
+}
+
+func TestSubmitSettlesALossWithoutMovingMoney(t *testing.T) {
+	service, repo, p := fixture(t, "100.00")
+	p.Kind = wagering.KindLoss
+	p.Money = brl(t, "0")
+
+	result, err := service.Submit(context.Background(), p)
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if result.Transaction.Status() != wagering.StatusProcessed {
+		t.Fatalf("status = %s, want PROCESSED", result.Transaction.Status())
+	}
+	if got := result.Transaction.ResultBalance().String(); got != "100.00 BRL" {
+		t.Errorf("resultBalance = %s, want the unchanged 100.00 BRL", got)
+	}
+	if got := repo.wallet.Balance().String(); got != "100.00 BRL" {
+		t.Errorf("balance = %s, want 100.00 BRL", got)
+	}
+	if repo.wallet.Version() != 1 {
+		t.Errorf("version = %d, want 1", repo.wallet.Version())
+	}
+	if len(repo.entries) != 0 {
+		t.Errorf("ledger entries = %d, want none", len(repo.entries))
+	}
+}
+
+func TestSubmitRejectsALossInTheWrongCurrency(t *testing.T) {
+	service, _, p := fixture(t, "100.00")
+	p.Kind = wagering.KindLoss
+
+	zero, err := money.Parse("0.00", money.EUR)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	p.Money = zero
+
+	result, err := service.Submit(context.Background(), p)
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got := result.Transaction.FailureCode(); got != wagering.FailureCurrencyMismatch {
+		t.Errorf("failureCode = %s, want WALLET_CURRENCY_MISMATCH", got)
+	}
+}
+
 func TestSubmitRefusesOpeningAndUnhandledKinds(t *testing.T) {
 	service, _, p := fixture(t, "100.00")
+	p.ReferenceExternalTransactionID = "transaction-122"
 
-	for _, kind := range []wagering.Kind{wagering.KindOpening, wagering.KindWin, wagering.KindLoss} {
+	for _, kind := range []wagering.Kind{wagering.KindOpening, wagering.KindRefund, wagering.KindRollback} {
 		p.Kind = kind
 		if _, err := service.Submit(context.Background(), p); err == nil {
-			t.Errorf("Submit(%s) succeeded; only BET is handled here", kind)
+			t.Errorf("Submit(%s) succeeded; only BET, WIN and LOSS are handled here", kind)
 		}
 	}
 }

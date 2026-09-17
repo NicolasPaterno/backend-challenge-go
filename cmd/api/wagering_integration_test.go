@@ -82,21 +82,34 @@ type betResult struct {
 	Code string
 }
 
+// kind, currency and reference are empty in the many BET cases below, where
+// the zero value stands for the §9 example request.
 type bet struct {
 	externalID string
 	key        string
 	playerID   string
 	walletID   string
 	amount     string
+	kind       string
+	currency   string
+	reference  string
 	client     *http.Client
 }
 
 func (w *wagering) bet(b bet) betResult {
 	w.t.Helper()
 
+	if b.kind == "" {
+		b.kind = "BET"
+	}
+	if b.currency == "" {
+		b.currency = "BRL"
+	}
+
 	request := fmt.Sprintf(`{"providerId":"provider-a","externalTransactionId":%q,"playerId":%q,`+
-		`"walletId":%q,"roundId":"round-987","gameId":"fortune-chimp","kind":"BET",`+
-		`"money":{"amount":%q,"currency":"BRL"}}`, b.externalID, b.playerID, b.walletID, b.amount)
+		`"walletId":%q,"roundId":"round-987","gameId":"fortune-chimp","kind":%q,`+
+		`"money":{"amount":%q,"currency":%q},"referenceExternalTransactionId":%q}`,
+		b.externalID, b.playerID, b.walletID, b.kind, b.amount, b.currency, b.reference)
 
 	post, err := http.NewRequest(http.MethodPost, w.base+"/wagering/transactions", strings.NewReader(request))
 	if err != nil {
@@ -137,6 +150,11 @@ func (w *wagering) bet(b bet) betResult {
 }
 
 func (w *wagering) balance(walletID string) string {
+	balance, _ := w.wallet(walletID)
+	return balance
+}
+
+func (w *wagering) wallet(walletID string) (balance string, version int64) {
 	w.t.Helper()
 
 	resp, err := w.internal.Get(w.base + "/wallets/" + walletID)
@@ -149,14 +167,15 @@ func (w *wagering) balance(walletID string) string {
 		Balance struct {
 			Amount string `json:"amount"`
 		} `json:"balance"`
+		Version int64 `json:"version"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&read); err != nil {
 		w.t.Fatalf("decode wallet: %v", err)
 	}
-	return read.Balance.Amount
+	return read.Balance.Amount, read.Version
 }
 
-func (w *wagering) debits(walletID string) int {
+func (w *wagering) ledger(walletID string) []string {
 	w.t.Helper()
 
 	resp, err := w.internal.Get(w.base + "/wallets/" + walletID + "/ledger?limit=200")
@@ -174,9 +193,19 @@ func (w *wagering) debits(walletID string) int {
 		w.t.Fatalf("decode ledger: %v", err)
 	}
 
-	debits := 0
+	directions := make([]string, 0, len(page.Entries))
 	for _, entry := range page.Entries {
-		if entry.Direction == "DEBIT" {
+		directions = append(directions, entry.Direction)
+	}
+	return directions
+}
+
+func (w *wagering) debits(walletID string) int {
+	w.t.Helper()
+
+	debits := 0
+	for _, direction := range w.ledger(walletID) {
+		if direction == "DEBIT" {
 			debits++
 		}
 	}
@@ -503,5 +532,137 @@ func TestProvidersAreIsolated(t *testing.T) {
 	}
 	if got := api.balance(walletID); got != "75.00" {
 		t.Errorf("balance = %s, want 75.00; a refused request must move no money", got)
+	}
+}
+
+func TestWinCreditsTheWallet(t *testing.T) {
+	api := startWagering(t)
+	playerID := uuid.NewV7().String()
+	walletID := api.openWallet(playerID, "100.00")
+
+	won := api.bet(bet{
+		externalID: "transaction-win", key: "provider-a:transaction-win",
+		playerID: playerID, walletID: walletID, amount: "25.00",
+		kind: "WIN", reference: "transaction-never-submitted",
+	})
+	if won.Status != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%+v)", won.Status, http.StatusOK, won)
+	}
+	if won.Balance != "125.00" {
+		t.Errorf("balance = %s, want 125.00", won.Balance)
+	}
+
+	balance, version := api.wallet(walletID)
+	if balance != "125.00" {
+		t.Errorf("stored balance = %s, want 125.00", balance)
+	}
+	if version != 2 {
+		t.Errorf("version = %d, want 2", version)
+	}
+	if got := api.ledger(walletID); len(got) != 2 {
+		t.Errorf("ledger entries = %v, want the opening credit and the WIN's", got)
+	}
+
+	replay := api.bet(bet{
+		externalID: "transaction-win", key: "provider-a:transaction-win",
+		playerID: playerID, walletID: walletID, amount: "25.00",
+		kind: "WIN", reference: "transaction-never-submitted",
+	})
+	if !replay.IdempotentReplay || replay.Balance != "125.00" {
+		t.Errorf("the resubmission did not replay the stored result: %+v", replay)
+	}
+	if balance, _ := api.wallet(walletID); balance != "125.00" {
+		t.Errorf("balance after the replay = %s, want 125.00", balance)
+	}
+}
+
+func TestLossSettlesWithoutMovingMoney(t *testing.T) {
+	api := startWagering(t)
+	playerID := uuid.NewV7().String()
+	walletID := api.openWallet(playerID, "100.00")
+	_, opened := api.wallet(walletID)
+
+	lost := api.bet(bet{
+		externalID: "transaction-loss", key: "provider-a:transaction-loss",
+		playerID: playerID, walletID: walletID, amount: "0.00", kind: "LOSS",
+	})
+	if lost.Status != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%+v)", lost.Status, http.StatusOK, lost)
+	}
+	if lost.Balance != "100.00" {
+		t.Errorf("balance = %s, want the unchanged 100.00", lost.Balance)
+	}
+
+	balance, version := api.wallet(walletID)
+	if balance != "100.00" {
+		t.Errorf("stored balance = %s, want 100.00", balance)
+	}
+	if version != opened {
+		t.Errorf("version = %d, want the unchanged %d", version, opened)
+	}
+	if got := api.ledger(walletID); len(got) != 1 {
+		t.Errorf("ledger entries = %v, want only the opening credit", got)
+	}
+}
+
+// §7 writes the LOSS rule as money.amount == "0.00"; A.3.1 reads it as the
+// value zero, so an equivalent spelling is accepted and a non-zero is refused.
+func TestLossAmountPolicy(t *testing.T) {
+	api := startWagering(t)
+	playerID := uuid.NewV7().String()
+	walletID := api.openWallet(playerID, "100.00")
+
+	spelled := api.bet(bet{
+		externalID: "transaction-zero", key: "provider-a:transaction-zero",
+		playerID: playerID, walletID: walletID, amount: "0", kind: "LOSS",
+	})
+	if spelled.Status != http.StatusOK {
+		t.Errorf(`a LOSS of "0" status = %d, want %d (%+v)`, spelled.Status, http.StatusOK, spelled)
+	}
+
+	// Refused by the constructor, so it is invalid input with no record and no
+	// failure code (A.3.5), not a business rejection.
+	nonZero := api.bet(bet{
+		externalID: "transaction-nonzero", key: "provider-a:transaction-nonzero",
+		playerID: playerID, walletID: walletID, amount: "25.00", kind: "LOSS",
+	})
+	if nonZero.Status != http.StatusBadRequest {
+		t.Errorf("a non-zero LOSS status = %d, want %d (%+v)", nonZero.Status, http.StatusBadRequest, nonZero)
+	}
+
+	// Unlike the two above, decided against a real wallet: a recorded rejection,
+	// not invalid input.
+	foreign := api.bet(bet{
+		externalID: "transaction-eur", key: "provider-a:transaction-eur",
+		playerID: playerID, walletID: walletID, amount: "0.00", kind: "LOSS", currency: "EUR",
+	})
+	if foreign.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("a LOSS in EUR status = %d, want %d (%+v)", foreign.Status, http.StatusUnprocessableEntity, foreign)
+	}
+	if foreign.Code != "WALLET_CURRENCY_MISMATCH" {
+		t.Errorf("failure code = %q, want WALLET_CURRENCY_MISMATCH", foreign.Code)
+	}
+
+	if balance, _ := api.wallet(walletID); balance != "100.00" {
+		t.Errorf("balance = %s, want 100.00; no LOSS moves money", balance)
+	}
+}
+
+func TestReversalsAreNotSupportedYet(t *testing.T) {
+	api := startWagering(t)
+	playerID := uuid.NewV7().String()
+	walletID := api.openWallet(playerID, "100.00")
+
+	for _, kind := range []string{"REFUND", "ROLLBACK"} {
+		t.Run(kind, func(t *testing.T) {
+			refused := api.bet(bet{
+				externalID: "transaction-" + kind, key: "provider-a:transaction-" + kind,
+				playerID: playerID, walletID: walletID, amount: "25.00",
+				kind: kind, reference: "transaction-123",
+			})
+			if refused.Status != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d (%+v)", refused.Status, http.StatusBadRequest, refused)
+			}
+		})
 	}
 }

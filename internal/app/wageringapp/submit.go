@@ -106,8 +106,8 @@ func (s *Service) Submit(ctx context.Context, p SubmitParams) (Result, error) {
 	}
 
 	// After the constructor, so OPENING is refused by the domain rule that owns
-	// it (A.1). 09 adds WIN and LOSS, 12 the reversals.
-	if t.Kind() != wagering.KindBet {
+	// it (A.1); before the repository, so no record is left. 12 deletes this.
+	if t.Kind().IsReversal() {
 		return Result{}, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
 	}
 
@@ -154,7 +154,21 @@ func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
 			return nil, t.Reject(wagering.FailureCurrencyMismatch, w.Balance(), now)
 		}
 
-		entry, err := w.Debit(s.ids.NewID(), t.ID(), t.Amount(), now)
+		var (
+			entry *wallet.LedgerEntry
+			err   error
+		)
+		switch t.Kind() {
+		case wagering.KindBet:
+			entry, err = w.Debit(s.ids.NewID(), t.ID(), t.Amount(), now)
+		case wagering.KindWin:
+			entry, err = w.Credit(s.ids.NewID(), t.ID(), t.Amount(), now)
+		case wagering.KindLoss:
+			// §7: no movement — the money already left on the BET.
+		default:
+			return nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
+		}
+
 		switch {
 		case errors.Is(err, wallet.ErrInsufficientFunds):
 			return nil, t.Reject(wagering.FailureInsufficientFunds, w.Balance(), now)
