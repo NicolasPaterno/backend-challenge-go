@@ -6,8 +6,11 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"uuid"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/events"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/worker/outbox"
 )
 
 // attempts, next_attempt_at and published_at are left to their defaults: 11
@@ -31,4 +34,82 @@ func insertOutbox(ctx context.Context, tx pgx.Tx, outbox []events.Envelope) erro
 		}
 	}
 	return nil
+}
+
+type OutboxStore struct {
+	pool *pgxpool.Pool
+}
+
+func NewOutboxStore(pool *pgxpool.Pool) *OutboxStore {
+	return &OutboxStore{pool: pool}
+}
+
+const (
+	// SKIP LOCKED is the claim: a row another publisher holds is invisible here,
+	// so several of them drain the same table without ever meeting on a row
+	// (§11). The lease is the transaction itself — a publisher that dies has its
+	// rows released by Postgres at once, with no lease column to expire.
+	claimDueEvents = `
+		SELECT event_id, aggregate_id, payload
+		FROM outbox_events
+		WHERE published_at IS NULL AND next_attempt_at <= now()
+		ORDER BY next_attempt_at, event_id
+		LIMIT $1
+		FOR UPDATE SKIP LOCKED`
+
+	markPublished = `UPDATE outbox_events SET published_at = now() WHERE event_id = ANY($1)`
+
+	// Doubling from one second, capped at five minutes, computed with an integer
+	// shift because power() is floating point (§5.1).
+	backOff = `
+		UPDATE outbox_events
+		SET attempts = attempts + 1,
+		    next_attempt_at = now() + least(1 << least(attempts, 8), 300) * interval '1 second'
+		WHERE event_id = ANY($1)`
+)
+
+func (s *OutboxStore) Drain(ctx context.Context, limit int, publish func(context.Context, outbox.Event) error) (int, error) {
+	var published int
+	var sendErr error
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, claimDueEvents, limit)
+		if err != nil {
+			return fmt.Errorf("claim outbox events: %w", err)
+		}
+		claimed, err := pgx.CollectRows(rows, pgx.RowToStructByPos[outbox.Event])
+		if err != nil {
+			return fmt.Errorf("read claimed outbox events: %w", err)
+		}
+
+		var sent, failed []uuid.UUID
+		for _, e := range claimed {
+			if err := publish(ctx, e); err != nil {
+				failed = append(failed, e.EventID)
+				sendErr = fmt.Errorf("publish %d of %d events: %w", len(failed), len(claimed), err)
+				continue
+			}
+			sent = append(sent, e.EventID)
+		}
+
+		if len(sent) > 0 {
+			if _, err := tx.Exec(ctx, markPublished, sent); err != nil {
+				return fmt.Errorf("mark outbox events published: %w", err)
+			}
+		}
+		if len(failed) > 0 {
+			if _, err := tx.Exec(ctx, backOff, failed); err != nil {
+				return fmt.Errorf("back off outbox events: %w", err)
+			}
+		}
+
+		published = len(sent)
+		// A failed send is reported after the commit, never as a rollback: the
+		// backoff is the outcome of the cycle, and losing it would spin on the
+		// same row.
+		return nil
+	})
+	if err != nil {
+		return published, err
+	}
+	return published, sendErr
 }
