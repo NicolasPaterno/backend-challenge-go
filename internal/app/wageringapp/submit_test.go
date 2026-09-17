@@ -41,10 +41,11 @@ func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, deci
 		r.byExternal[t.ProviderID()+"|"+t.ExternalTransactionID()] != nil {
 		return ErrDuplicate
 	}
-	if r.wallet == nil || r.wallet.ID() != t.WalletID() {
-		return ErrWalletNotFound
+	found := r.wallet
+	if found != nil && found.ID() != t.WalletID() {
+		found = nil
 	}
-	if _, err := decide(r.wallet); err != nil {
+	if _, err := decide(found); err != nil {
 		return err
 	}
 	r.byKey[t.ProviderID()+"|"+t.IdempotencyKey()] = t
@@ -204,16 +205,33 @@ func TestSubmitRejectsABetItCannotCover(t *testing.T) {
 	}
 }
 
-func TestSubmitRejectsAnotherPlayersWallet(t *testing.T) {
-	service, _, p := fixture(t, "100.00")
-	p.PlayerID = uuid.NewV7()
-
-	result, err := service.Submit(context.Background(), p)
-	if err != nil {
-		t.Fatalf("Submit() error = %v", err)
+// §11 owes a rejection event to both, so both must be recorded, not returned as
+// an error. One code for the two denies an enumeration oracle (§2).
+func TestSubmitRecordsWalletNotFound(t *testing.T) {
+	tests := map[string]func(*SubmitParams){
+		"another player's wallet": func(p *SubmitParams) { p.PlayerID = uuid.NewV7() },
+		"no such wallet":          func(p *SubmitParams) { p.WalletID = uuid.NewV7() },
 	}
-	if got := result.Transaction.FailureCode(); got != wagering.FailureWalletNotFound {
-		t.Errorf("failureCode = %s, want WALLET_NOT_FOUND", got)
+
+	for name, break_ := range tests {
+		t.Run(name, func(t *testing.T) {
+			service, _, p := fixture(t, "100.00")
+			break_(&p)
+
+			result, err := service.Submit(context.Background(), p)
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			if result.Transaction.Status() != wagering.StatusRejected {
+				t.Errorf("status = %s, want REJECTED", result.Transaction.Status())
+			}
+			if got := result.Transaction.FailureCode(); got != wagering.FailureWalletNotFound {
+				t.Errorf("failureCode = %s, want WALLET_NOT_FOUND", got)
+			}
+			if result.Transaction.ResultBalance().IsValid() {
+				t.Error("a rejection with no wallet reported a balance")
+			}
+		})
 	}
 }
 

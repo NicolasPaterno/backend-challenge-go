@@ -35,7 +35,7 @@ func TestMigrationsApplyAndRollBack(t *testing.T) {
 	if err := migrations.Up(databaseURL); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
-	assertVersion(6)
+	assertVersion(7)
 
 	conn, err := pgx.Connect(ctx, databaseURL)
 	if err != nil {

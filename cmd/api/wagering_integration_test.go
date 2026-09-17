@@ -356,6 +356,48 @@ func TestReplayReturnsTheOriginalBalance(t *testing.T) {
 	}
 }
 
+// §11 owes a rejection event to an unknown wallet, so the refusal is a record,
+// not a 404 that leaves nothing behind.
+func TestBetAgainstAnUnknownWalletIsRecorded(t *testing.T) {
+	api := startWagering(t)
+
+	submitted := bet{
+		externalID: "transaction-1", key: "provider-a:transaction-1",
+		playerID: uuid.NewV7().String(), walletID: uuid.NewV7().String(), amount: "25.00",
+	}
+	rejected := api.bet(submitted)
+	if rejected.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d (%+v)", rejected.Status, http.StatusUnprocessableEntity, rejected)
+	}
+	if rejected.Code != "WALLET_NOT_FOUND" {
+		t.Errorf("failure code = %q, want WALLET_NOT_FOUND", rejected.Code)
+	}
+
+	resp, err := api.provider.Get(api.base + "/providers/provider-a/wagering/transactions/transaction-1")
+	if err != nil {
+		t.Fatalf("GET transaction: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the rejection was not persisted: status = %d", resp.StatusCode)
+	}
+
+	var stored struct {
+		Status      string `json:"status"`
+		FailureCode string `json:"failureCode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&stored); err != nil {
+		t.Fatalf("decode transaction: %v", err)
+	}
+	if stored.Status != "REJECTED" || stored.FailureCode != "WALLET_NOT_FOUND" {
+		t.Errorf("stored = %s/%s, want REJECTED/WALLET_NOT_FOUND", stored.Status, stored.FailureCode)
+	}
+
+	if replay := api.bet(submitted); !replay.IdempotentReplay {
+		t.Error("the resubmission did not report idempotentReplay")
+	}
+}
+
 // §2, §13.
 func TestProvidersAreIsolated(t *testing.T) {
 	api := startWagering(t)

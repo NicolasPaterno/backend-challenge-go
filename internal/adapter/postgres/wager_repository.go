@@ -44,15 +44,18 @@ const (
 
 func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransaction, decide wageringapp.Decide) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		// A wallet that does not exist is handed to decide as nil: the rejection
+		// it produces is recorded like any other (§11).
 		w, err := scanWallet(tx.QueryRow(ctx, lockWallet, t.WalletID()), t.WalletID())
-		if errors.Is(err, pgx.ErrNoRows) {
-			return wageringapp.ErrWalletNotFound
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 
-		observed := w.Version()
+		var observed int64
+		if w != nil {
+			observed = w.Version()
+		}
+
 		entry, err := decide(w)
 		if err != nil {
 			return err

@@ -23,7 +23,6 @@ var (
 	ErrPayloadConflict    = errors.New("wageringapp: the idempotency key was reused with different content")
 	ErrExternalIDConflict = errors.New("wageringapp: the operation was already submitted under another idempotency key")
 	ErrConcurrentUpdate   = errors.New("wageringapp: the wallet changed under the update")
-	ErrWalletNotFound     = errors.New("wageringapp: wallet not found")
 	ErrNotFound           = errors.New("wageringapp: transaction not found")
 	ErrUnsupportedKind    = errors.New("wageringapp: kind is not handled yet")
 )
@@ -31,6 +30,9 @@ var (
 // Decide runs inside the repository's SQL transaction with the wallet row
 // already locked. It returns nil when the operation moved no money, and settles
 // the transaction's own state before the repository writes it.
+//
+// w is nil when no wallet carries that id. That is a rejection like any other
+// and is still recorded, because §11 owes every rejection an event.
 type Decide func(w *wallet.Wallet) (*wallet.LedgerEntry, error)
 
 // Process owns the whole commit rather than handing out a transaction handle: a
@@ -142,8 +144,9 @@ func (s *Service) replay(ctx context.Context, p SubmitParams, hash string) (Resu
 func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
 	return func(w *wallet.Wallet) (*wallet.LedgerEntry, error) {
 		// One code for "no such wallet" and "not this player's wallet": telling
-		// them apart would enumerate wallets (§2).
-		if w.PlayerID() != t.PlayerID() {
+		// them apart would enumerate wallets (§2). Neither has a balance to
+		// report, so the rejection carries the zero Money (04 §7).
+		if w == nil || w.PlayerID() != t.PlayerID() {
 			return nil, t.Reject(wagering.FailureWalletNotFound, money.Money{}, now)
 		}
 		if w.Currency() != t.Amount().Currency() {
