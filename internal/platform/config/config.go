@@ -29,6 +29,14 @@ type Config struct {
 	OIDCIssuerURL    string
 	OIDCDiscoveryURL string
 	OIDCAudience     string
+
+	AWSRegion      string
+	AWSEndpointURL string
+
+	OutboxQueueURL      string
+	OutboxPollInterval  time.Duration
+	OutboxPublishWindow time.Duration
+	OutboxBatchSize     int
 }
 
 // Load reports every problem at once, so a misconfigured deployment is not
@@ -60,6 +68,14 @@ func Load() (Config, error) {
 	}
 	cfg.OIDCDiscoveryURL = envOr("OIDC_DISCOVERY_URL", cfg.OIDCIssuerURL)
 
+	cfg.AWSRegion = envOr("AWS_REGION", "us-east-1")
+	cfg.AWSEndpointURL = os.Getenv("AWS_ENDPOINT_URL")
+
+	cfg.OutboxQueueURL = os.Getenv("OUTBOX_QUEUE_URL")
+	if cfg.OutboxQueueURL == "" {
+		fail("OUTBOX_QUEUE_URL is required")
+	}
+
 	if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {
 		fail("HTTP_ADDR must be a host:port listen address, got %q", cfg.HTTPAddr)
 	}
@@ -78,6 +94,17 @@ func Load() (Config, error) {
 	var lockTimeoutErr error
 	cfg.DBLockTimeout, lockTimeoutErr = durationEnv("DB_LOCK_TIMEOUT", 3*time.Second)
 	errs = append(errs, lockTimeoutErr)
+
+	var pollErr, windowErr error
+	cfg.OutboxPollInterval, pollErr = durationEnv("OUTBOX_POLL_INTERVAL", time.Second)
+	// Bounds one publish cycle, and with it how long a claimed row stays locked
+	// by a publisher that hangs instead of dying (§11).
+	cfg.OutboxPublishWindow, windowErr = durationEnv("OUTBOX_PUBLISH_WINDOW", 10*time.Second)
+	errs = append(errs, pollErr, windowErr)
+
+	batchSize, batchErr := intEnv("OUTBOX_BATCH_SIZE", 100, 1)
+	errs = append(errs, batchErr)
+	cfg.OutboxBatchSize = batchSize
 
 	maxConns, maxErr := intEnv("DB_MAX_CONNS", 10, 1)
 	minConns, minErr := intEnv("DB_MIN_CONNS", 1, 0)

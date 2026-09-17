@@ -18,11 +18,14 @@ func setEnv(t *testing.T, env map[string]string) {
 		"HTTP_READ_HEADER_TIMEOUT", "SHUTDOWN_TIMEOUT", "STARTUP_TIMEOUT",
 		"DB_MAX_CONNS", "DB_MIN_CONNS",
 		"OIDC_ISSUER_URL", "OIDC_DISCOVERY_URL", "OIDC_AUDIENCE",
+		"AWS_REGION", "AWS_ENDPOINT_URL", "OUTBOX_QUEUE_URL",
+		"OUTBOX_POLL_INTERVAL", "OUTBOX_PUBLISH_WINDOW", "OUTBOX_BATCH_SIZE",
 	} {
 		t.Setenv(key, "")
 	}
 	t.Setenv("OIDC_ISSUER_URL", "http://localhost:8081/realms/wagering")
 	t.Setenv("OIDC_AUDIENCE", "wagering-api")
+	t.Setenv("OUTBOX_QUEUE_URL", "http://localhost:4566/000000000000/wager-events.fifo")
 	for key, value := range env {
 		t.Setenv(key, value)
 	}
@@ -47,6 +50,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 	if cfg.DBMaxConns != 10 || cfg.DBMinConns != 1 {
 		t.Errorf("pool bounds = (%d, %d), want (1, 10)", cfg.DBMinConns, cfg.DBMaxConns)
+	}
+	if cfg.OutboxPollInterval != time.Second || cfg.OutboxBatchSize != 100 {
+		t.Errorf("outbox defaults = (%v, %d), want (1s, 100)", cfg.OutboxPollInterval, cfg.OutboxBatchSize)
 	}
 	// The API is normally reachable under one name, so discovery follows the issuer.
 	if cfg.OIDCDiscoveryURL != cfg.OIDCIssuerURL {
@@ -104,6 +110,13 @@ func TestLoadRejectsInvalidEnvironment(t *testing.T) {
 				"OIDC_ISSUER_URL": "",
 			},
 			want: "OIDC_ISSUER_URL is required",
+		},
+		"missing outbox queue": {
+			env: map[string]string{
+				"DATABASE_URL":     "postgres://localhost/db",
+				"OUTBOX_QUEUE_URL": "",
+			},
+			want: "OUTBOX_QUEUE_URL is required",
 		},
 		"missing audience": {
 			env: map[string]string{
