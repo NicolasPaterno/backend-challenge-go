@@ -39,6 +39,13 @@ const (
 			failure_code, result_balance_minor, created_at, updated_at
 		) VALUES ($1, 'EXTERNAL', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`
 
+	// The two indexes §9's idempotency rests on, and the only ones whose
+	// violation means "this operation already exists". The reversal index of
+	// 0009 is deliberately absent: reaching it means the lock below failed to
+	// serialise two reversals, which is a bug, not a replay.
+	idempotencyKeyIndex = "wager_transactions_provider_key_unique"
+	externalIDIndex     = "wager_transactions_provider_external_unique"
+
 	// Redundant under the lock above, and what still refuses a lost update if a
 	// caller ever reaches this statement without it (§5.7).
 	updateWalletBalance = `
@@ -89,7 +96,7 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 			nullString(t.FailureCode().String()), nullMinor(t.ResultBalance()),
 			t.CreatedAt(), t.UpdatedAt())
 		switch {
-		case isUniqueViolation(err):
+		case isUniqueViolationOn(err, idempotencyKeyIndex, externalIDIndex):
 			return wageringapp.ErrDuplicate
 		case err != nil:
 			return fmt.Errorf("insert wager transaction: %w", err)

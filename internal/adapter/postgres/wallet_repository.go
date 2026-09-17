@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgerrcode"
@@ -130,6 +131,18 @@ func scanWallet(row pgx.Row, id uuid.UUID) (*wallet.Wallet, error) {
 
 func isUniqueViolation(err error) bool {
 	return hasCode(err, pgerrcode.UniqueViolation)
+}
+
+// isUniqueViolationOn names the indexes a caller knows how to answer for.
+// wager_transactions carries more than one, and mapping all of them to a single
+// meaning is what made a reversal race read as an idempotency conflict; an
+// index not listed here is a bug and must surface as one (§9).
+func isUniqueViolationOn(err error, indexes ...string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.UniqueViolation {
+		return false
+	}
+	return slices.Contains(indexes, pgErr.ConstraintName)
 }
 
 // The wallet is held by another writer for longer than DB_LOCK_TIMEOUT. Nothing
