@@ -28,6 +28,10 @@ type Repository interface {
 	Open(ctx context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry, outbox []events.Envelope) error
 	ByID(ctx context.Context, id uuid.UUID) (*wallet.Wallet, error)
 	Ledger(ctx context.Context, walletID uuid.UUID, after *LedgerCursor, limit int) ([]*wallet.LedgerEntry, error)
+	// Reconcile reads the stored balance and the one rebuilt from the ledger in
+	// a single consistent view, so a concurrent movement cannot show up as a
+	// divergence (§9).
+	Reconcile(ctx context.Context, walletID uuid.UUID) (stored, calculated money.Money, entries int, err error)
 }
 
 // A port so a test can make ids predictable without making them predictable in

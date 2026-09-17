@@ -213,3 +213,41 @@ func (r *WalletRepository) Ledger(ctx context.Context, walletID uuid.UUID, after
 	}
 	return entries, nil
 }
+
+// One statement, so both sides are read from one snapshot: PostgreSQL takes it
+// at statement start, which is what §9 asks of the consistent view. A wallet
+// with no entries is the LEFT JOIN's zero, not a missing row.
+const selectReconciliation = `
+	SELECT w.currency, w.balance_minor,
+	       COALESCE(SUM(CASE e.direction WHEN 'CREDIT' THEN e.amount_minor ELSE -e.amount_minor END), 0),
+	       COUNT(e.id)
+	FROM wallets w
+	LEFT JOIN wallet_ledger_entries e ON e.wallet_id = w.id
+	WHERE w.id = $1
+	GROUP BY w.currency, w.balance_minor`
+
+func (r *WalletRepository) Reconcile(ctx context.Context, walletID uuid.UUID) (stored, calculated money.Money, entries int, err error) {
+	var (
+		rawCurrency               string
+		balanceMinor, ledgerMinor int64
+	)
+	err = r.pool.QueryRow(ctx, selectReconciliation, walletID).
+		Scan(&rawCurrency, &balanceMinor, &ledgerMinor, &entries)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return stored, calculated, 0, walletapp.ErrNotFound
+	case err != nil:
+		return stored, calculated, 0, fmt.Errorf("select reconciliation: %w", err)
+	}
+
+	currency, err := money.ParseCurrency(rawCurrency)
+	if err != nil {
+		return stored, calculated, 0, fmt.Errorf("wallet %s: %w", walletID, err)
+	}
+	stored, err1 := money.FromMinor(balanceMinor, currency)
+	calculated, err2 := money.FromMinor(ledgerMinor, currency)
+	if err := errors.Join(err1, err2); err != nil {
+		return stored, calculated, 0, fmt.Errorf("wallet %s: %w", walletID, err)
+	}
+	return stored, calculated, entries, nil
+}

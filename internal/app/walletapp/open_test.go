@@ -27,6 +27,9 @@ type recordingRepo struct {
 	outbox  []events.Envelope
 	limit   int
 	err     error
+
+	stored, calculated money.Money
+	entries            int
 }
 
 func (r *recordingRepo) Open(_ context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry, outbox []events.Envelope) error {
@@ -44,6 +47,10 @@ func (r *recordingRepo) Ledger(_ context.Context, _ uuid.UUID, _ *LedgerCursor, 
 		return nil, r.err
 	}
 	return []*wallet.LedgerEntry{r.entry}, r.err
+}
+
+func (r *recordingRepo) Reconcile(context.Context, uuid.UUID) (money.Money, money.Money, int, error) {
+	return r.stored, r.calculated, r.entries, r.err
 }
 
 func open(t *testing.T, amount string) (*wallet.Wallet, *recordingRepo) {
