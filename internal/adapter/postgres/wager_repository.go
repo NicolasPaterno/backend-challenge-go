@@ -49,6 +49,18 @@ const (
 	idempotencyKeyIndex = "wager_transactions_provider_key_unique"
 	externalIDIndex     = "wager_transactions_provider_external_unique"
 
+	// §6.5: one handling per (consumerName, messageId). There is one consumer,
+	// so its name is a constant rather than a setting nothing would vary.
+	consumerName = "wager-transactions"
+	inboxIndex   = "inbox_messages_pkey"
+
+	insertInbox = `
+		INSERT INTO inbox_messages (consumer_name, message_id, payload_hash, received_at, completed_at)
+		VALUES ($1, $2, $3, $4, now())`
+
+	selectInboxHash = `
+		SELECT payload_hash FROM inbox_messages WHERE consumer_name = $1 AND message_id = $2`
+
 	// Redundant under the lock above, and what still refuses a lost update if a
 	// caller ever reaches this statement without it (§5.7).
 	updateWalletBalance = `
@@ -56,8 +68,22 @@ const (
 		WHERE id = $1 AND version = $5`
 )
 
-func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransaction, decide wageringapp.Decide) error {
+func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransaction, inbox wageringapp.Inbox, decide wageringapp.Decide) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		// First, so a redelivery is answered before any work is repeated, and in
+		// this transaction, so the record and what it caused commit together
+		// (§6.5).
+		if !inbox.IsZero() {
+			_, err := tx.Exec(ctx, insertInbox,
+				consumerName, inbox.MessageID, t.PayloadHash(), inbox.ReceivedAt)
+			switch {
+			case isUniqueViolationOn(err, inboxIndex):
+				return wageringapp.ErrDuplicateMessage
+			case err != nil:
+				return fmt.Errorf("insert inbox message: %w", err)
+			}
+		}
+
 		// A wallet that does not exist is handed to decide as nil: the rejection
 		// it produces is recorded like any other (§11).
 		w, err := scanWallet(tx.QueryRow(ctx, lockWallet, t.WalletID()), t.WalletID())
@@ -161,6 +187,18 @@ const (
 		    next_attempt_at = now() + least(1 << least(attempts, 8), 300) * interval '1 second'
 		WHERE id = $1`
 )
+
+func (r *WagerRepository) MessageHash(ctx context.Context, messageID string) (string, error) {
+	var hash string
+	err := r.pool.QueryRow(ctx, selectInboxHash, consumerName, messageID).Scan(&hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", wageringapp.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("select inbox message %s: %w", messageID, err)
+	}
+	return hash, nil
+}
 
 func (r *WagerRepository) DuePendingReferences(ctx context.Context, limit int) ([]uuid.UUID, error) {
 	rows, err := r.pool.Query(ctx, duePendingReferences, limit)

@@ -30,6 +30,7 @@ type fakeRepo struct {
 	outbox     []events.Envelope
 	byKey      map[string]*wagering.WagerTransaction
 	byExternal map[string]*wagering.WagerTransaction
+	inbox      map[string]string
 }
 
 func newFakeRepo(w *wallet.Wallet) *fakeRepo {
@@ -37,10 +38,16 @@ func newFakeRepo(w *wallet.Wallet) *fakeRepo {
 		wallet:     w,
 		byKey:      map[string]*wagering.WagerTransaction{},
 		byExternal: map[string]*wagering.WagerTransaction{},
+		inbox:      map[string]string{},
 	}
 }
 
-func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, decide Decide) error {
+func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, inbox Inbox, decide Decide) error {
+	if !inbox.IsZero() {
+		if _, handled := r.inbox[inbox.MessageID]; handled {
+			return ErrDuplicateMessage
+		}
+	}
 	if r.byKey[t.ProviderID()+"|"+t.IdempotencyKey()] != nil ||
 		r.byExternal[t.ProviderID()+"|"+t.ExternalTransactionID()] != nil {
 		return ErrDuplicate
@@ -64,7 +71,18 @@ func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, deci
 	r.outbox = append(r.outbox, outbox...)
 	r.byKey[t.ProviderID()+"|"+t.IdempotencyKey()] = t
 	r.byExternal[t.ProviderID()+"|"+t.ExternalTransactionID()] = t
+	if !inbox.IsZero() {
+		r.inbox[inbox.MessageID] = t.PayloadHash()
+	}
 	return nil
+}
+
+func (r *fakeRepo) MessageHash(_ context.Context, messageID string) (string, error) {
+	hash, handled := r.inbox[messageID]
+	if !handled {
+		return "", ErrNotFound
+	}
+	return hash, nil
 }
 
 // A.8.1's rule as the partial unique index of 0009 enforces it: any successful

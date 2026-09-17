@@ -26,7 +26,14 @@ var (
 	ErrConcurrentUpdate   = errors.New("wageringapp: the wallet changed under the update")
 	ErrWalletBusy         = errors.New("wageringapp: the wallet is held by another writer")
 	ErrNotFound           = errors.New("wageringapp: transaction not found")
-	ErrUnsupportedKind    = errors.New("wageringapp: kind is not handled yet")
+
+	// ErrDuplicateMessage is the inbox's own uniqueness firing: this consumer
+	// already handled a message with this id (§6.5).
+	ErrDuplicateMessage = errors.New("wageringapp: this message was already handled")
+	// ErrMessageConflict is the same message id carrying different content, which
+	// §10 requires be detected on a redelivery.
+	ErrMessageConflict = errors.New("wageringapp: the message id was reused with different content")
+	ErrUnsupportedKind = errors.New("wageringapp: kind is not handled yet")
 )
 
 // Reference is the operation a REFUND or ROLLBACK undoes, read by the
@@ -55,10 +62,16 @@ type Decide func(w *wallet.Wallet, ref *Reference) (*wallet.LedgerEntry, []event
 // Process owns the whole commit rather than handing out a transaction handle: a
 // caller holding one could commit half of it (§5.3).
 type Repository interface {
-	Process(ctx context.Context, t *wagering.WagerTransaction, decide Decide) error
+	// inbox is zero for an HTTP submission; when it is not, its row is written
+	// in this same transaction (§6.5).
+	Process(ctx context.Context, t *wagering.WagerTransaction, inbox Inbox, decide Decide) error
 	ByID(ctx context.Context, id uuid.UUID) (*wagering.WagerTransaction, error)
 	ByIdempotencyKey(ctx context.Context, providerID, key string) (*wagering.WagerTransaction, error)
 	ByExternalID(ctx context.Context, providerID, externalTransactionID string) (*wagering.WagerTransaction, error)
+
+	// MessageHash is the payload hash stored when this consumer handled the
+	// message, which §10 requires be verified on a redelivery.
+	MessageHash(ctx context.Context, messageID string) (string, error)
 
 	// DuePendingReferences lists the waiting reversals whose next attempt has
 	// come round, oldest first.
@@ -112,7 +125,22 @@ type SubmitParams struct {
 	Kind                           wagering.Kind
 	Money                          money.Money
 	ReferenceExternalTransactionID string
+
+	// Inbox is set when the operation arrived on the queue, and zero when it
+	// arrived over HTTP. It is transport metadata, so PayloadHash ignores it
+	// (§9) and the two paths hash identically (§10).
+	Inbox Inbox
 }
+
+// Inbox is the durable identity of an inbound message: §10 makes it the
+// envelope's messageId, and §6.5 makes the record share the commit with the
+// domain change it caused.
+type Inbox struct {
+	MessageID  string
+	ReceivedAt time.Time
+}
+
+func (i Inbox) IsZero() bool { return i.MessageID == "" }
 
 type Result struct {
 	Transaction *wagering.WagerTransaction
@@ -144,15 +172,31 @@ func (s *Service) Submit(ctx context.Context, p SubmitParams) (Result, error) {
 
 	// No pre-read: the unique violation is the only duplicate check that also
 	// holds against a submission racing this one in another process.
-	err = s.repo.Process(ctx, t, s.decide(t, now))
+	err = s.repo.Process(ctx, t, p.Inbox, s.decide(t, now))
 	switch {
 	case err == nil:
 		return Result{Transaction: t}, nil
+	case errors.Is(err, ErrDuplicateMessage):
+		return s.replayMessage(ctx, p, hash)
 	case errors.Is(err, ErrDuplicate):
 		return s.replay(ctx, p, hash)
 	default:
 		return Result{}, err
 	}
+}
+
+// replayMessage answers a redelivery. §10 asks that the hash be verified: the
+// same id carrying different content is a producer fault, not a repeat, and the
+// consumer must not treat it as handled.
+func (s *Service) replayMessage(ctx context.Context, p SubmitParams, hash string) (Result, error) {
+	handled, err := s.repo.MessageHash(ctx, p.Inbox.MessageID)
+	if err != nil {
+		return Result{}, err
+	}
+	if handled != hash {
+		return Result{}, ErrMessageConflict
+	}
+	return s.replay(ctx, p, hash)
 }
 
 // replay says what the unique violation meant. No record under this key means
