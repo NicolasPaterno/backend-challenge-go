@@ -14,6 +14,7 @@ import (
 	"go.uber.org/fx"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/config"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/correlation"
 )
 
 const RouteGroup = `group:"routes"`
@@ -43,10 +44,22 @@ func NewServeMux(routes []Route) (*http.ServeMux, error) {
 	return mux, nil
 }
 
+// CorrelationHeader is both directions: the id a caller sends is adopted, and
+// the one in use is echoed so the caller can quote it (§12).
+const CorrelationHeader = "X-Correlation-Id"
+
+func correlated(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, id := correlation.Ensure(r.Context(), r.Header.Get(CorrelationHeader))
+		w.Header().Set(CorrelationHeader, id.String())
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func NewServer(lc fx.Lifecycle, cfg config.Config, mux *http.ServeMux, logger *slog.Logger) *http.Server {
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           mux,
+		Handler:           correlated(mux),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 	}
 
