@@ -51,9 +51,7 @@ func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, deci
 	}
 	var ref *Reference
 	if t.Kind().IsReversal() {
-		if referenced := r.byExternal[t.ProviderID()+"|"+t.ReferenceExternalTransactionID()]; referenced != nil {
-			ref = &Reference{Transaction: referenced, Reversed: r.reversed(referenced.ID())}
-		}
+		ref = r.reference(t)
 	}
 
 	entry, outbox, err := decide(found, ref)
@@ -79,6 +77,45 @@ func (r *fakeRepo) reversed(referenceID uuid.UUID) bool {
 		}
 	}
 	return false
+}
+
+func (r *fakeRepo) DuePendingReferences(context.Context, int) ([]uuid.UUID, error) {
+	var due []uuid.UUID
+	for _, t := range r.byKey {
+		if t.Status() == wagering.StatusPendingReference {
+			due = append(due, t.ID())
+		}
+	}
+	return due, nil
+}
+
+func (r *fakeRepo) Resume(ctx context.Context, id uuid.UUID, decide func(*wagering.WagerTransaction) Decide) error {
+	t, err := r.ByID(ctx, id)
+	if err != nil || t.Status() != wagering.StatusPendingReference {
+		return nil
+	}
+	found := r.wallet
+	if found != nil && found.ID() != t.WalletID() {
+		found = nil
+	}
+
+	entry, outbox, err := decide(t)(found, r.reference(t))
+	if err != nil {
+		return err
+	}
+	if entry != nil {
+		r.entries = append(r.entries, entry)
+	}
+	r.outbox = append(r.outbox, outbox...)
+	return nil
+}
+
+func (r *fakeRepo) reference(t *wagering.WagerTransaction) *Reference {
+	referenced := r.byExternal[t.ProviderID()+"|"+t.ReferenceExternalTransactionID()]
+	if referenced == nil {
+		return nil
+	}
+	return &Reference{Transaction: referenced, Reversed: r.reversed(referenced.ID())}
 }
 
 func (r *fakeRepo) ByID(_ context.Context, id uuid.UUID) (*wagering.WagerTransaction, error) {
@@ -124,7 +161,7 @@ func fixture(t *testing.T, balance string) (*Service, *fakeRepo, SubmitParams) {
 	}
 
 	repo := newFakeRepo(w)
-	return NewService(repo, &sequentialIDs{}), repo, SubmitParams{
+	return NewService(repo, &sequentialIDs{}, ReferenceTTL(24*time.Hour)), repo, SubmitParams{
 		ProviderID:            "provider-a",
 		ExternalTransactionID: "transaction-123",
 		IdempotencyKey:        "provider-a:transaction-123",

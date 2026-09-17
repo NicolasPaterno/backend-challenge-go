@@ -59,6 +59,16 @@ type Repository interface {
 	ByID(ctx context.Context, id uuid.UUID) (*wagering.WagerTransaction, error)
 	ByIdempotencyKey(ctx context.Context, providerID, key string) (*wagering.WagerTransaction, error)
 	ByExternalID(ctx context.Context, providerID, externalTransactionID string) (*wagering.WagerTransaction, error)
+
+	// DuePendingReferences lists the waiting reversals whose next attempt has
+	// come round, oldest first.
+	DuePendingReferences(ctx context.Context, limit int) ([]uuid.UUID, error)
+
+	// Resume re-runs one of them: the repository rehydrates the record, locks
+	// its wallet and resolves the reference, then applies the decision the
+	// callback builds for that record. A record still PENDING_REFERENCE after
+	// the decision is backed off for the next attempt.
+	Resume(ctx context.Context, id uuid.UUID, decide func(*wagering.WagerTransaction) Decide) error
 }
 
 // Duplicated from walletapp so the two use case packages share no import (§4).
@@ -70,14 +80,25 @@ type UUIDv7 struct{}
 
 func (UUIDv7) NewID() uuid.UUID { return uuid.NewV7() }
 
+// ReferenceTTL bounds how long a reversal waits for its reference (§7). Named
+// rather than a bare time.Duration so the Fx graph cannot confuse it with
+// another one.
+type ReferenceTTL time.Duration
+
 type Service struct {
-	repo Repository
-	ids  IDGenerator
-	now  func() time.Time
+	repo         Repository
+	ids          IDGenerator
+	referenceTTL ReferenceTTL
+	now          func() time.Time
 }
 
-func NewService(repo Repository, ids IDGenerator) *Service {
-	return &Service{repo: repo, ids: ids, now: func() time.Time { return time.Now().UTC() }}
+func NewService(repo Repository, ids IDGenerator, referenceTTL ReferenceTTL) *Service {
+	return &Service{
+		repo:         repo,
+		ids:          ids,
+		referenceTTL: referenceTTL,
+		now:          func() time.Time { return time.Now().UTC() },
+	}
 }
 
 type SubmitParams struct {
@@ -185,15 +206,23 @@ func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
 // run before the movement, so a refused reversal leaves the wallet untouched.
 func (s *Service) reverse(t *wagering.WagerTransaction, w *wallet.Wallet, ref *Reference, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
 	// Absent, or present but not finished: both are references that are not
-	// available yet, which §7 waits for rather than refuses (A.8.2). 13 adds the
-	// worker that retries and expires the wait.
+	// available yet, which §7 waits for rather than refuses (A.8.2).
 	if ref == nil || !ref.Transaction.Status().IsTerminal() {
+		// Already waiting, so this is the reference worker looking again. §7
+		// requires the wait be bounded; on expiry it ends REJECTED with the
+		// reference-not-found code, and otherwise the caller backs it off.
+		if t.Status() == wagering.StatusPendingReference {
+			if t.ReferenceExpired(now) {
+				return s.reject(t, wagering.FailureReferenceNotFound, w.Balance(), now)
+			}
+			return nil, nil, nil
+		}
 		if ref != nil {
 			if err := t.ResolveReference(ref.Transaction.ID()); err != nil {
 				return nil, nil, err
 			}
 		}
-		if err := t.MarkPendingReference(now); err != nil {
+		if err := t.MarkPendingReference(now.Add(time.Duration(s.referenceTTL)), now); err != nil {
 			return nil, nil, err
 		}
 		return nil, s.outbox(t, nil, 0, now), nil

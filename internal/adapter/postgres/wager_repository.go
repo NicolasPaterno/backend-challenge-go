@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"uuid"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/app/wageringapp"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/events"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
 )
 
 type WagerRepository struct {
@@ -36,8 +39,8 @@ const (
 			id, origin, kind, status, wallet_id, player_id, currency, amount_minor,
 			provider_id, external_transaction_id, idempotency_key, payload_hash,
 			round_id, game_id, reference_external_transaction_id, reference_transaction_id,
-			failure_code, result_balance_minor, created_at, updated_at
-		) VALUES ($1, 'EXTERNAL', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`
+			reference_deadline_at, failure_code, result_balance_minor, created_at, updated_at
+		) VALUES ($1, 'EXTERNAL', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`
 
 	// The two indexes §9's idempotency rests on, and the only ones whose
 	// violation means "this operation already exists". The reversal index of
@@ -93,8 +96,8 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 			t.ProviderID(), t.ExternalTransactionID(), t.IdempotencyKey(), t.PayloadHash(),
 			t.RoundID(), t.GameID(),
 			nullString(t.ReferenceExternalTransactionID()), nullUUID(t.ReferenceTransactionID()),
-			nullString(t.FailureCode().String()), nullMinor(t.ResultBalance()),
-			t.CreatedAt(), t.UpdatedAt())
+			nullTime(t.ReferenceDeadlineAt()), nullString(t.FailureCode().String()),
+			nullMinor(t.ResultBalance()), t.CreatedAt(), t.UpdatedAt())
 		switch {
 		case isUniqueViolationOn(err, idempotencyKeyIndex, externalIDIndex):
 			return wageringapp.ErrDuplicate
@@ -102,28 +105,118 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 			return fmt.Errorf("insert wager transaction: %w", err)
 		}
 
-		if entry == nil {
-			return insertOutbox(ctx, tx, outbox)
-		}
+		return applyOutcome(ctx, tx, w, observed, entry, outbox)
+	})
+}
 
-		_, err = tx.Exec(ctx, insertLedgerEntry,
-			entry.ID(), entry.WalletID(), entry.TransactionID(), entry.Direction().String(),
-			entry.Amount().Currency().String(), entry.Amount().Minor(),
-			entry.BalanceBefore().Minor(), entry.BalanceAfter().Minor(), entry.CreatedAt())
-		if err != nil {
-			return fmt.Errorf("insert ledger entry: %w", err)
-		}
-
-		tag, err := tx.Exec(ctx, updateWalletBalance,
-			w.ID(), w.Balance().Minor(), w.Version(), w.UpdatedAt(), observed)
-		if err != nil {
-			return fmt.Errorf("update wallet balance: %w", err)
-		}
-		if tag.RowsAffected() != 1 {
-			return fmt.Errorf("wallet %s: %w", w.ID(), wageringapp.ErrConcurrentUpdate)
-		}
-
+// applyOutcome writes what the decision produced beyond the transaction row
+// itself: the movement, if there was one, and the events it owes (§5.4). Shared
+// by the submission path and the resumption path, which differ only in whether
+// that row is inserted or updated.
+func applyOutcome(ctx context.Context, tx pgx.Tx, w *wallet.Wallet, observed int64, entry *wallet.LedgerEntry, outbox []events.Envelope) error {
+	if entry == nil {
 		return insertOutbox(ctx, tx, outbox)
+	}
+
+	_, err := tx.Exec(ctx, insertLedgerEntry,
+		entry.ID(), entry.WalletID(), entry.TransactionID(), entry.Direction().String(),
+		entry.Amount().Currency().String(), entry.Amount().Minor(),
+		entry.BalanceBefore().Minor(), entry.BalanceAfter().Minor(), entry.CreatedAt())
+	if err != nil {
+		return fmt.Errorf("insert ledger entry: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx, updateWalletBalance,
+		w.ID(), w.Balance().Minor(), w.Version(), w.UpdatedAt(), observed)
+	if err != nil {
+		return fmt.Errorf("update wallet balance: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("wallet %s: %w", w.ID(), wageringapp.ErrConcurrentUpdate)
+	}
+
+	return insertOutbox(ctx, tx, outbox)
+}
+
+const (
+	duePendingReferences = `
+		SELECT id FROM wager_transactions
+		WHERE status = 'PENDING_REFERENCE' AND next_attempt_at <= now()
+		ORDER BY next_attempt_at, id
+		LIMIT $1`
+
+	// SKIP LOCKED so a second worker moves on rather than queueing; the status
+	// predicate is what makes a record another worker already finished
+	// invisible to this one.
+	claimWaiting = selectTransaction + "id = $1 AND status = 'PENDING_REFERENCE' FOR UPDATE SKIP LOCKED"
+
+	// Doubling from one second, capped at five minutes, with the integer shift
+	// the outbox uses — power() is floating point (§5.1). next_attempt_at on a
+	// record that has finished is read by nothing: the index above is partial.
+	resumeOutcome = `
+		UPDATE wager_transactions
+		SET status = $2, failure_code = $3, result_balance_minor = $4,
+		    reference_transaction_id = $5, updated_at = $6,
+		    attempts = attempts + 1,
+		    next_attempt_at = now() + least(1 << least(attempts, 8), 300) * interval '1 second'
+		WHERE id = $1`
+)
+
+func (r *WagerRepository) DuePendingReferences(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx, duePendingReferences, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select due pending references: %w", err)
+	}
+	due, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("read due pending references: %w", err)
+	}
+	return due, nil
+}
+
+func (r *WagerRepository) Resume(ctx context.Context, id uuid.UUID, decide func(*wagering.WagerTransaction) wageringapp.Decide) error {
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		t, err := one(ctx, tx, claimWaiting, id)
+		if errors.Is(err, wageringapp.ErrNotFound) {
+			// Claimed by another worker, or already finished. Not this cycle's
+			// work and not an error.
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		w, err := scanWallet(tx.QueryRow(ctx, lockWallet, t.WalletID()), t.WalletID())
+		switch {
+		case isLockNotAvailable(err):
+			return wageringapp.ErrWalletBusy
+		case err != nil && !errors.Is(err, pgx.ErrNoRows):
+			return err
+		}
+
+		var observed int64
+		if w != nil {
+			observed = w.Version()
+		}
+
+		ref, err := reference(ctx, tx, t)
+		if err != nil {
+			return err
+		}
+
+		entry, outbox, err := decide(t)(w, ref)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, resumeOutcome,
+			t.ID(), t.Status().String(), nullString(t.FailureCode().String()),
+			nullMinor(t.ResultBalance()), nullUUID(t.ReferenceTransactionID()), t.UpdatedAt())
+		if err != nil {
+			return fmt.Errorf("update resumed transaction: %w", err)
+		}
+
+		return applyOutcome(ctx, tx, w, observed, entry, outbox)
 	})
 }
 
@@ -131,7 +224,7 @@ const selectTransaction = `
 	SELECT id, origin, kind, status, wallet_id, player_id, currency, amount_minor,
 	       provider_id, external_transaction_id, idempotency_key, payload_hash,
 	       round_id, game_id, reference_external_transaction_id, reference_transaction_id,
-	       failure_code, result_balance_minor, created_at, updated_at
+	       reference_deadline_at, failure_code, result_balance_minor, created_at, updated_at
 	FROM wager_transactions WHERE `
 
 // A.8.1's rule as a query: any successful reversal spends the reference,
@@ -189,6 +282,7 @@ func one(ctx context.Context, q querier, query string, args ...any) (*wagering.W
 		providerID, externalID, key, hash, roundID, gameID *string
 		referenceExternalID, rawFailureCode                *string
 		referenceID                                        *uuid.UUID
+		referenceDeadline                                  *time.Time
 		amountMinor                                        int64
 		resultBalanceMinor                                 *int64
 	)
@@ -196,7 +290,7 @@ func one(ctx context.Context, q querier, query string, args ...any) (*wagering.W
 		&p.ID, &rawOrigin, &rawKind, &rawStatus, &p.WalletID, &p.PlayerID, &rawCurrency, &amountMinor,
 		&providerID, &externalID, &key, &hash,
 		&roundID, &gameID, &referenceExternalID, &referenceID,
-		&rawFailureCode, &resultBalanceMinor, &p.CreatedAt, &p.UpdatedAt)
+		&referenceDeadline, &rawFailureCode, &resultBalanceMinor, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, wageringapp.ErrNotFound
 	}
@@ -232,6 +326,9 @@ func one(ctx context.Context, q querier, query string, args ...any) (*wagering.W
 	if referenceID != nil {
 		p.ReferenceTransactionID = *referenceID
 	}
+	if referenceDeadline != nil {
+		p.ReferenceDeadlineAt = *referenceDeadline
+	}
 
 	return wagering.Rehydrate(p)
 }
@@ -243,6 +340,13 @@ func nullString(s string) any {
 		return nil
 	}
 	return s
+}
+
+func nullTime(at time.Time) any {
+	if at.IsZero() {
+		return nil
+	}
+	return at
 }
 
 func nullUUID(id uuid.UUID) any {

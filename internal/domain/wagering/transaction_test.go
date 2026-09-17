@@ -289,7 +289,7 @@ func TestPendingIsUnreachable(t *testing.T) {
 	for _, status := range []wagering.Status{wagering.StatusPendingReference, wagering.StatusProcessed, wagering.StatusRejected, wagering.StatusFailed} {
 		tx := rehydrated(t, status)
 		for _, attempt := range []func() error{
-			func() error { return tx.MarkPendingReference(changedAt) },
+			func() error { return tx.MarkPendingReference(changedAt.Add(time.Hour), changedAt) },
 			func() error { return tx.MarkProcessed(brl(t, "1.00"), changedAt) },
 			func() error { return tx.Reject(wagering.FailureInsufficientFunds, money.Money{}, changedAt) },
 			func() error { return tx.Fail(wagering.FailureInternalError, changedAt) },
@@ -570,7 +570,7 @@ func move(t *testing.T, tx *wagering.WagerTransaction, to wagering.Status) error
 	t.Helper()
 	switch to {
 	case wagering.StatusPendingReference:
-		return tx.MarkPendingReference(changedAt)
+		return tx.MarkPendingReference(changedAt.Add(time.Hour), changedAt)
 	case wagering.StatusProcessed:
 		return tx.MarkProcessed(brl(t, "975.00"), changedAt)
 	case wagering.StatusRejected:
@@ -580,5 +580,40 @@ func move(t *testing.T, tx *wagering.WagerTransaction, to wagering.Status) error
 	default:
 		t.Fatalf("no method transitions to %s", to)
 		return nil
+	}
+}
+
+// §7 bounds the wait, so a record cannot enter PENDING_REFERENCE without the
+// deadline it will be judged against.
+func TestMarkPendingReferenceRequiresAFutureDeadline(t *testing.T) {
+	for name, deadline := range map[string]time.Time{
+		"missing": {},
+		"past":    changedAt.Add(-time.Second),
+		"now":     changedAt,
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx := rehydrated(t, wagering.StatusPending)
+			if err := tx.MarkPendingReference(deadline, changedAt); !errors.Is(err, wagering.ErrUninitialized) {
+				t.Errorf("MarkPendingReference(%v) error = %v, want ErrUninitialized", deadline, err)
+			}
+			if tx.Status() != wagering.StatusPending {
+				t.Errorf("status = %s, want the refused transition to leave it PENDING", tx.Status())
+			}
+		})
+	}
+
+	tx := rehydrated(t, wagering.StatusPending)
+	deadline := changedAt.Add(24 * time.Hour)
+	if err := tx.MarkPendingReference(deadline, changedAt); err != nil {
+		t.Fatalf("MarkPendingReference() error = %v", err)
+	}
+	if !tx.ReferenceDeadlineAt().Equal(deadline) {
+		t.Errorf("ReferenceDeadlineAt() = %s, want %s", tx.ReferenceDeadlineAt(), deadline)
+	}
+	if tx.ReferenceExpired(deadline.Add(-time.Second)) {
+		t.Error("the wait reported itself expired before its deadline")
+	}
+	if !tx.ReferenceExpired(deadline) {
+		t.Error("the wait did not expire at its deadline")
 	}
 }

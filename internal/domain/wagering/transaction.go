@@ -123,6 +123,7 @@ type WagerTransaction struct {
 
 	referenceExternalTransactionID string
 	referenceTransactionID         uuid.UUID
+	referenceDeadlineAt            time.Time
 
 	failureCode   FailureCode
 	resultBalance money.Money
@@ -249,6 +250,7 @@ type RehydrateParams struct {
 	GameID                         string
 	ReferenceExternalTransactionID string
 	ReferenceTransactionID         uuid.UUID
+	ReferenceDeadlineAt            time.Time
 	FailureCode                    FailureCode
 	ResultBalance                  money.Money
 	CreatedAt                      time.Time
@@ -306,6 +308,7 @@ func Rehydrate(p RehydrateParams) (*WagerTransaction, error) {
 		gameID:                         p.GameID,
 		referenceExternalTransactionID: p.ReferenceExternalTransactionID,
 		referenceTransactionID:         p.ReferenceTransactionID,
+		referenceDeadlineAt:            p.ReferenceDeadlineAt,
 		failureCode:                    p.FailureCode,
 		resultBalance:                  p.ResultBalance,
 		createdAt:                      p.CreatedAt,
@@ -344,6 +347,10 @@ func (t *WagerTransaction) ReferenceExternalTransactionID() string {
 }
 
 func (t *WagerTransaction) ReferenceTransactionID() uuid.UUID { return t.referenceTransactionID }
+
+// ReferenceDeadlineAt is when this wait stops being retried and becomes a
+// rejection (§7). Zero unless the record is, or has been, PENDING_REFERENCE.
+func (t *WagerTransaction) ReferenceDeadlineAt() time.Time { return t.referenceDeadlineAt }
 
 func (t *WagerTransaction) FailureCode() FailureCode { return t.failureCode }
 
@@ -384,8 +391,26 @@ func (t *WagerTransaction) ResolveReference(id uuid.UUID) error {
 	return nil
 }
 
-func (t *WagerTransaction) MarkPendingReference(now time.Time) error {
-	return t.transition(StatusPendingReference, now)
+// MarkPendingReference records the wait and the deadline it is accepted under.
+// The deadline is stamped here, once, so a later change of REFERENCE_TTL cannot
+// expire a reversal that was already waiting (§7).
+func (t *WagerTransaction) MarkPendingReference(deadlineAt, now time.Time) error {
+	if deadlineAt.IsZero() {
+		return fmt.Errorf("%w: referenceDeadlineAt", ErrUninitialized)
+	}
+	if !deadlineAt.After(now) {
+		return fmt.Errorf("%w: referenceDeadlineAt %s is not after %s", ErrUninitialized, deadlineAt, now)
+	}
+	if err := t.transition(StatusPendingReference, now); err != nil {
+		return err
+	}
+	t.referenceDeadlineAt = deadlineAt
+	return nil
+}
+
+// ReferenceExpired reports that the wait has run out (§7).
+func (t *WagerTransaction) ReferenceExpired(now time.Time) bool {
+	return t.status == StatusPendingReference && !now.Before(t.referenceDeadlineAt)
 }
 
 // Reject records a business refusal. The code is the caller's to choose: the
