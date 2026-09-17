@@ -91,19 +91,27 @@ func (r *WalletRepository) Open(ctx context.Context, w *wallet.Wallet, opening *
 }
 
 func (r *WalletRepository) ByID(ctx context.Context, id uuid.UUID) (*wallet.Wallet, error) {
-	var (
-		playerID             uuid.UUID
-		rawCurrency          string
-		balanceMinor         int64
-		version              int64
-		createdAt, updatedAt time.Time
-	)
-	err := r.pool.QueryRow(ctx, selectWallet, id).
-		Scan(&playerID, &rawCurrency, &balanceMinor, &version, &createdAt, &updatedAt)
+	w, err := scanWallet(r.pool.QueryRow(ctx, selectWallet, id), id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, walletapp.ErrNotFound
 	}
-	if err != nil {
+	return w, err
+}
+
+// Shared with the locking read of the wagering repository, which needs the same
+// columns under FOR UPDATE. pgx.ErrNoRows is passed through: each caller names
+// the absence in its own vocabulary.
+func scanWallet(row pgx.Row, id uuid.UUID) (*wallet.Wallet, error) {
+	var (
+		playerID              uuid.UUID
+		rawCurrency           string
+		balanceMinor, version int64
+		createdAt, updatedAt  time.Time
+	)
+	if err := row.Scan(&playerID, &rawCurrency, &balanceMinor, &version, &createdAt, &updatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("select wallet: %w", err)
 	}
 
