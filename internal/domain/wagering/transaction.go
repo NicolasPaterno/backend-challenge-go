@@ -5,6 +5,7 @@ package wagering
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"uuid"
@@ -25,6 +26,25 @@ var (
 	ErrNoReference        = errors.New("wagering: no referenceExternalTransactionId applies to this operation")
 	ErrInvalidTransition  = errors.New("wagering: transition is not permitted")
 )
+
+// IsRefusal reports an error a constructor raised because the request itself is
+// malformed — a non-zero LOSS, an OPENING from outside, a reversal with no
+// reference. None of them produces a record, so none carries a FailureCode
+// (A.3.5), and no retry changes the answer: HTTP reports them as invalid input
+// and the consumer treats them as permanent (§10).
+func IsRefusal(err error) bool {
+	refusals := []error{
+		ErrOpeningIsInternal,
+		ErrInvalidKind,
+		ErrUninitialized,
+		ErrAmountNotZero,
+		ErrAmountNotPositive,
+		ErrMissingReference,
+		ErrNoReference,
+		money.ErrNegativeAmount,
+	}
+	return slices.ContainsFunc(refusals, func(refusal error) bool { return errors.Is(err, refusal) })
+}
 
 // TransitionError names both ends of a refused transition so a caller can log
 // what it tried. errors.Is matches it against ErrInvalidTransition.

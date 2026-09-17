@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"slices"
 	"time"
 
 	"uuid"
@@ -100,7 +99,7 @@ func (h *WageringHandler) submit(w http.ResponseWriter, r *http.Request) {
 			"this externalTransactionId was already submitted under another Idempotency-Key")
 	case errors.Is(err, wageringapp.ErrWalletBusy):
 		writeUnavailable(w, "the wallet is busy; the operation was not applied")
-	case errors.Is(err, wageringapp.ErrUnsupportedKind), isConstructorRefusal(err):
+	case errors.Is(err, wageringapp.ErrUnsupportedKind), wagering.IsRefusal(err):
 		writeProblem(w, http.StatusBadRequest, CodeValidationFailed, "the request has invalid fields",
 			kindViolation(err))
 	default:
@@ -198,21 +197,6 @@ func parseUUIDField(field, value string, violations *[]Violation) uuid.UUID {
 		*violations = append(*violations, Violation{field, ViolationInvalid, field + " must be a UUID"})
 	}
 	return parsed
-}
-
-// What a wagering constructor refuses never becomes a record, so it carries no
-// FailureCode and is reported as invalid input (A.3.5).
-func isConstructorRefusal(err error) bool {
-	refusals := []error{
-		wagering.ErrOpeningIsInternal,
-		wagering.ErrInvalidKind,
-		wagering.ErrUninitialized,
-		wagering.ErrAmountNotZero,
-		wagering.ErrAmountNotPositive,
-		wagering.ErrMissingReference,
-		wagering.ErrNoReference,
-	}
-	return slices.ContainsFunc(refusals, func(refusal error) bool { return errors.Is(err, refusal) })
 }
 
 type transactionResponse struct {
