@@ -77,7 +77,7 @@ func (h *WalletHandler) open(w http.ResponseWriter, r *http.Request) {
 	if len(body.InitialBalance) == 0 {
 		violations = append(violations, Violation{"initialBalance", ViolationRequired, "initialBalance is required"})
 	} else if err := json.Unmarshal(body.InitialBalance, &initialBalance); err != nil {
-		violations = append(violations, Violation{"initialBalance", ViolationInvalid, err.Error()})
+		violations = append(violations, moneyViolation("initialBalance", err))
 	}
 
 	if len(violations) > 0 {

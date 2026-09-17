@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/NicolasPaterno/backend-challenge-go/internal/app/wageringapp"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 )
 
@@ -59,6 +61,45 @@ const (
 	ViolationRequired = "REQUIRED"
 	ViolationInvalid  = "INVALID"
 )
+
+// A domain error names the package that produced it, which is no business of a
+// caller, so each sentinel a request boundary can reach gets one sentence here.
+// The default covers the wrapped encoding/json errors, which carry no sentinel.
+func moneyViolation(field string, err error) Violation {
+	detail := field + " is not a valid monetary value"
+	switch {
+	case errors.Is(err, money.ErrUninitialized):
+		detail = field + " must carry an amount and a currency"
+	case errors.Is(err, money.ErrInvalidAmount):
+		detail = field + ".amount must be a decimal string with at most two decimal places"
+	case errors.Is(err, money.ErrNegativeAmount):
+		detail = field + ".amount must not be negative"
+	case errors.Is(err, money.ErrInvalidCurrency):
+		detail = field + ".currency must be one of BRL, EUR, USD"
+	case errors.Is(err, money.ErrOverflow):
+		detail = field + ".amount is out of range"
+	}
+	return Violation{field, ViolationInvalid, detail}
+}
+
+func kindViolation(err error) Violation {
+	detail := "kind is not valid for this request"
+	switch {
+	case errors.Is(err, wagering.ErrOpeningIsInternal):
+		detail = "OPENING is reserved for internal wallet opening"
+	case errors.Is(err, wagering.ErrMissingReference):
+		detail = "this kind requires referenceExternalTransactionId"
+	case errors.Is(err, wagering.ErrNoReference):
+		detail = "referenceExternalTransactionId does not apply to this kind"
+	case errors.Is(err, wagering.ErrAmountNotZero):
+		detail = "this kind requires an amount of 0.00"
+	case errors.Is(err, wagering.ErrAmountNotPositive):
+		detail = "this kind requires an amount greater than zero"
+	case errors.Is(err, wageringapp.ErrUnsupportedKind):
+		detail = "this kind is not supported yet"
+	}
+	return Violation{"kind", ViolationInvalid, detail}
+}
 
 const problemContentType = "application/problem+json"
 

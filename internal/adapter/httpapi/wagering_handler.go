@@ -100,12 +100,9 @@ func (h *WageringHandler) submit(w http.ResponseWriter, r *http.Request) {
 			"this externalTransactionId was already submitted under another Idempotency-Key")
 	case errors.Is(err, wageringapp.ErrWalletNotFound):
 		writeProblem(w, http.StatusNotFound, CodeWalletNotFound, "wallet not found")
-	case errors.Is(err, wageringapp.ErrUnsupportedKind):
+	case errors.Is(err, wageringapp.ErrUnsupportedKind), isConstructorRefusal(err):
 		writeProblem(w, http.StatusBadRequest, CodeValidationFailed, "the request has invalid fields",
-			Violation{"kind", ViolationInvalid, err.Error()})
-	case isConstructorRefusal(err):
-		writeProblem(w, http.StatusBadRequest, CodeValidationFailed, "the request has invalid fields",
-			Violation{"kind", ViolationInvalid, err.Error()})
+			kindViolation(err))
 	default:
 		h.fail(w, r, "submit wager transaction", err)
 	}
@@ -174,7 +171,7 @@ func decodeSubmit(r *http.Request, body submitRequest) (wageringapp.SubmitParams
 	if len(body.Money) == 0 {
 		violations = append(violations, Violation{"money", ViolationRequired, "money is required"})
 	} else if err := json.Unmarshal(body.Money, &amount); err != nil {
-		violations = append(violations, Violation{"money", ViolationInvalid, err.Error()})
+		violations = append(violations, moneyViolation("money", err))
 	}
 
 	return wageringapp.SubmitParams{
