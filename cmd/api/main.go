@@ -6,6 +6,7 @@ import (
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/adapter/httpapi"
 	pgadapter "github.com/NicolasPaterno/backend-challenge-go/internal/adapter/postgres"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/adapter/sqs"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/app/wageringapp"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/app/walletapp"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/auth"
@@ -14,6 +15,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/httpserver"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/logging"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/postgres"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/worker/outbox"
 )
 
 func options() fx.Option {
@@ -28,6 +30,8 @@ func options() fx.Option {
 		walletapp.Module,
 		wageringapp.Module,
 		httpapi.Module,
+		sqs.Module,
+		outbox.Module,
 		fx.WithLogger(logging.FxLogger),
 	)
 }
