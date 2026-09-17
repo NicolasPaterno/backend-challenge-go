@@ -19,6 +19,11 @@ import (
 // service. Provider tokens do not carry it.
 const ScopeWallets = "wallets"
 
+// ScopeWagering guards the operation surface, which only providers reach. The
+// scope says the caller may submit at all; which provider it may act as comes
+// from the provider_id claim and from nowhere else (§2).
+const ScopeWagering = "wagering"
+
 var errNotDiscovered = errors.New("auth: the issuer has not been discovered yet")
 
 // tokenTypeBearer is the value Keycloak puts in an access token's typ claim; an

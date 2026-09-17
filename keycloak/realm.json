@@ -34,6 +34,15 @@
         "include.in.token.scope": "true",
         "display.on.consent.screen": "false"
       }
+    },
+    {
+      "name": "wagering",
+      "description": "The provider operation surface. The internal service never receives it.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
     }
   ],
   "clients": [
@@ -68,7 +77,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "secret": "provider-a-secret",
-      "defaultClientScopes": ["basic", "wagering-api-audience"],
+      "defaultClientScopes": ["basic", "wagering-api-audience", "wagering"],
       "optionalClientScopes": [],
       "protocolMappers": [
         {
@@ -97,7 +106,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "secret": "provider-b-secret",
-      "defaultClientScopes": ["basic", "wagering-api-audience"],
+      "defaultClientScopes": ["basic", "wagering-api-audience", "wagering"],
       "optionalClientScopes": [],
       "protocolMappers": [
         {
@@ -127,7 +136,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "secret": "provider-expiring-secret",
-      "defaultClientScopes": ["basic", "wagering-api-audience"],
+      "defaultClientScopes": ["basic", "wagering-api-audience", "wagering"],
       "optionalClientScopes": [],
       "attributes": {
         "access.token.lifespan": "1"
