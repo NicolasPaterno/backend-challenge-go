@@ -1,0 +1,1 @@
+DROP INDEX wager_transactions_reference_reversal_unique;
