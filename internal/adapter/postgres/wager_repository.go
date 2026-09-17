@@ -25,7 +25,11 @@ func NewWagerRepository(pool *pgxpool.Pool) *WagerRepository {
 const (
 	// §8's coordination point. Per wallet, so independent wallets still run in
 	// parallel; no advisory or table-wide lock is taken anywhere (§5.6).
-	lockWallet = selectWallet + " FOR UPDATE"
+	//
+	// NO KEY UPDATE rather than UPDATE: the id never changes here, and the
+	// weaker mode does not conflict with the FOR KEY SHARE that a foreign key
+	// check takes on this row.
+	lockWallet = selectWallet + " FOR NO KEY UPDATE"
 
 	insertExternalTransaction = `
 		INSERT INTO wager_transactions (
