@@ -15,7 +15,7 @@ func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 	for _, key := range []string{
 		"APP_ENV", "HTTP_ADDR", "LOG_LEVEL", "DATABASE_URL",
-		"HTTP_READ_HEADER_TIMEOUT", "SHUTDOWN_TIMEOUT", "STARTUP_TIMEOUT",
+		"HTTP_READ_HEADER_TIMEOUT", "SHUTDOWN_TIMEOUT", "STARTUP_TIMEOUT", "WORKER_DRAIN_TIMEOUT",
 		"DB_MAX_CONNS", "DB_MIN_CONNS",
 		"OIDC_ISSUER_URL", "OIDC_DISCOVERY_URL", "OIDC_AUDIENCE",
 		"AWS_REGION", "SQS_ENDPOINT", "SQS_WAGER_TRANSACTIONS_QUEUE_URL",
@@ -57,6 +57,11 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 	if cfg.OutboxPollInterval != time.Second || cfg.OutboxBatchSize != 100 {
 		t.Errorf("outbox defaults = (%v, %d), want (1s, 100)", cfg.OutboxPollInterval, cfg.OutboxBatchSize)
+	}
+	// A worker's share must stay under the whole shutdown, or it is no share.
+	if cfg.WorkerDrainTimeout != 5*time.Second || cfg.WorkerDrainTimeout >= cfg.ShutdownTimeout {
+		t.Errorf("WorkerDrainTimeout = %v, want 5s and under ShutdownTimeout %v",
+			cfg.WorkerDrainTimeout, cfg.ShutdownTimeout)
 	}
 	if cfg.ReferencePollInterval != time.Second || cfg.ReferenceBatchSize != 100 ||
 		cfg.ReferenceTTL != 24*time.Hour {

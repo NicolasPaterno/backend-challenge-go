@@ -68,10 +68,15 @@ func New(lc fx.Lifecycle, store Store, publisher Publisher, cfg config.Config, l
 		},
 		OnStop: func(ctx context.Context) error {
 			close(w.stop)
+
+			// Bounded by the worker's own share, not by the whole shutdown (§4).
+			drain, giveUp := context.WithTimeout(ctx, cfg.WorkerDrainTimeout)
+			defer giveUp()
+
 			select {
 			case <-w.done:
 				w.logger.Info("outbox publisher stopped")
-			case <-ctx.Done():
+			case <-drain.Done():
 				cancel()
 				<-w.done
 				w.logger.Warn("outbox publisher stopped past its deadline, in-flight claims released")

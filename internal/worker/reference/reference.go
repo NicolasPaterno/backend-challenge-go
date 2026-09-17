@@ -53,10 +53,15 @@ func New(lc fx.Lifecycle, resolver Resolver, cfg config.Config, logger *slog.Log
 		},
 		OnStop: func(ctx context.Context) error {
 			close(w.stop)
+
+			// Bounded by the worker's own share, not by the whole shutdown (§4).
+			drain, giveUp := context.WithTimeout(ctx, cfg.WorkerDrainTimeout)
+			defer giveUp()
+
 			select {
 			case <-w.done:
 				w.logger.Info("reference resolver stopped")
-			case <-ctx.Done():
+			case <-drain.Done():
 				cancel()
 				<-w.done
 				w.logger.Warn("reference resolver stopped past its deadline, in-flight claims released")

@@ -41,6 +41,8 @@ type Config struct {
 	OutboxPublishWindow time.Duration
 	OutboxBatchSize     int
 
+	WorkerDrainTimeout time.Duration
+
 	ReferencePollInterval time.Duration
 	ReferenceBatchSize    int
 	ReferenceTTL          time.Duration
@@ -107,6 +109,14 @@ func Load() (Config, error) {
 	cfg.ReadHeaderTimeout, readHeaderErr = durationEnv("HTTP_READ_HEADER_TIMEOUT", 5*time.Second)
 	cfg.ShutdownTimeout, shutdownErr = durationEnv("SHUTDOWN_TIMEOUT", 15*time.Second)
 	cfg.StartupTimeout, startupErr = durationEnv("STARTUP_TIMEOUT", 15*time.Second)
+	// Each worker's own share of the shutdown, so one draining slowly cannot
+	// spend SHUTDOWN_TIMEOUT and leave the HTTP server no time to finish its
+	// own in-flight work (§4). The effective wait is the smaller of this and
+	// whatever the shutdown has left, so a value above SHUTDOWN_TIMEOUT simply
+	// has no effect.
+	var drainErr error
+	cfg.WorkerDrainTimeout, drainErr = durationEnv("WORKER_DRAIN_TIMEOUT", 5*time.Second)
+	errs = append(errs, drainErr)
 	errs = append(errs, readHeaderErr, shutdownErr, startupErr)
 
 	var lockTimeoutErr error
