@@ -9,6 +9,7 @@ import (
 var Module = fx.Module("http-adapter",
 	fx.Provide(
 		NewWalletHandler,
+		NewGuard,
 		httpserver.AsRoute(NewOpenWalletRoute),
 		httpserver.AsRoute(NewGetWalletRoute),
 		httpserver.AsRoute(NewGetWalletLedgerRoute),

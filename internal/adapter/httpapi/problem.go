@@ -36,6 +36,8 @@ const (
 	CodeMalformedBody       = "MALFORMED_BODY"
 	CodeWalletAlreadyExists = "WALLET_ALREADY_EXISTS"
 	CodeWalletNotFound      = "WALLET_NOT_FOUND"
+	CodeUnauthenticated     = "UNAUTHENTICATED"
+	CodeForbidden           = "FORBIDDEN"
 	CodeInternalError       = "INTERNAL_ERROR"
 
 	ViolationRequired = "REQUIRED"

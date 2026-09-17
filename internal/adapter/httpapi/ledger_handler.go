@@ -13,11 +13,12 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/app/walletapp"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/auth"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/httpserver"
 )
 
-func NewGetWalletLedgerRoute(h *WalletHandler) httpserver.Route {
-	return httpserver.Route{Pattern: "GET /wallets/{walletId}/ledger", Handler: http.HandlerFunc(h.ledger)}
+func NewGetWalletLedgerRoute(h *WalletHandler, g *Guard) httpserver.Route {
+	return httpserver.Route{Pattern: "GET /wallets/{walletId}/ledger", Handler: g.Require(auth.ScopeWallets, h.ledger)}
 }
 
 type ledgerEntryResponse struct {

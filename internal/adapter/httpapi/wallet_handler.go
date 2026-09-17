@@ -11,6 +11,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/app/walletapp"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wallet"
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/auth"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/httpserver"
 )
 
@@ -23,12 +24,14 @@ func NewWalletHandler(wallets *walletapp.Service, logger *slog.Logger) *WalletHa
 	return &WalletHandler{wallets: wallets, logger: logger}
 }
 
-func NewOpenWalletRoute(h *WalletHandler) httpserver.Route {
-	return httpserver.Route{Pattern: "POST /wallets", Handler: http.HandlerFunc(h.open)}
+// The whole wallet surface is internal-service only (§2); a provider token is
+// verified and then refused with 403.
+func NewOpenWalletRoute(h *WalletHandler, g *Guard) httpserver.Route {
+	return httpserver.Route{Pattern: "POST /wallets", Handler: g.Require(auth.ScopeWallets, h.open)}
 }
 
-func NewGetWalletRoute(h *WalletHandler) httpserver.Route {
-	return httpserver.Route{Pattern: "GET /wallets/{walletId}", Handler: http.HandlerFunc(h.get)}
+func NewGetWalletRoute(h *WalletHandler, g *Guard) httpserver.Route {
+	return httpserver.Route{Pattern: "GET /wallets/{walletId}", Handler: g.Require(auth.ScopeWallets, h.get)}
 }
 
 type walletResponse struct {
