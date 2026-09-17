@@ -63,7 +63,19 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 			observed = w.Version()
 		}
 
-		entry, outbox, err := decide(w)
+		// Read under the same transaction as the decision it feeds. No lock of
+		// its own: a reversal only reaches PROCESSED after agreeing with its
+		// reference on the wallet, so two that could collide already hold the
+		// lock above. §8 puts the coordination per wallet and 0009's index is
+		// what guarantees the rule in the schema (§5.3, §5.8).
+		var ref *wageringapp.Reference
+		if t.Kind().IsReversal() {
+			if ref, err = reference(ctx, tx, t); err != nil {
+				return err
+			}
+		}
+
+		entry, outbox, err := decide(w, ref)
 		if err != nil {
 			return err
 		}
@@ -115,19 +127,55 @@ const selectTransaction = `
 	       failure_code, result_balance_minor, created_at, updated_at
 	FROM wager_transactions WHERE `
 
+// A.8.1's rule as a query: any successful reversal spends the reference,
+// whatever its kind. The partial unique index of 0009 is what holds it against
+// a race the wallet lock does not cover.
+const anySuccessfulReversal = `
+	SELECT EXISTS (
+		SELECT 1 FROM wager_transactions
+		WHERE reference_transaction_id = $1
+		  AND status = 'PROCESSED'
+		  AND kind IN ('REFUND', 'ROLLBACK'))`
+
+// reference resolves §7's (providerId, referenceExternalTransactionId). A nil
+// result means nothing matched, which the use case waits on rather than
+// refuses (A.8.2).
+func reference(ctx context.Context, q querier, t *wagering.WagerTransaction) (*wageringapp.Reference, error) {
+	found, err := one(ctx, q, selectTransaction+"provider_id = $1 AND external_transaction_id = $2",
+		t.ProviderID(), t.ReferenceExternalTransactionID())
+	if errors.Is(err, wageringapp.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var reversed bool
+	if err := q.QueryRow(ctx, anySuccessfulReversal, found.ID()).Scan(&reversed); err != nil {
+		return nil, fmt.Errorf("check reversals of %s: %w", found.ID(), err)
+	}
+	return &wageringapp.Reference{Transaction: found, Reversed: reversed}, nil
+}
+
 func (r *WagerRepository) ByID(ctx context.Context, id uuid.UUID) (*wagering.WagerTransaction, error) {
-	return r.one(ctx, selectTransaction+"id = $1", id)
+	return one(ctx, r.pool, selectTransaction+"id = $1", id)
 }
 
 func (r *WagerRepository) ByIdempotencyKey(ctx context.Context, providerID, key string) (*wagering.WagerTransaction, error) {
-	return r.one(ctx, selectTransaction+"provider_id = $1 AND idempotency_key = $2", providerID, key)
+	return one(ctx, r.pool, selectTransaction+"provider_id = $1 AND idempotency_key = $2", providerID, key)
 }
 
 func (r *WagerRepository) ByExternalID(ctx context.Context, providerID, externalTransactionID string) (*wagering.WagerTransaction, error) {
-	return r.one(ctx, selectTransaction+"provider_id = $1 AND external_transaction_id = $2", providerID, externalTransactionID)
+	return one(ctx, r.pool, selectTransaction+"provider_id = $1 AND external_transaction_id = $2", providerID, externalTransactionID)
 }
 
-func (r *WagerRepository) one(ctx context.Context, query string, args ...any) (*wagering.WagerTransaction, error) {
+// querier is what the pool and an open transaction have in common, so a read
+// runs inside Process's transaction or outside it without a second scanner.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func one(ctx context.Context, q querier, query string, args ...any) (*wagering.WagerTransaction, error) {
 	var (
 		p                                                  wagering.RehydrateParams
 		rawOrigin, rawKind, rawStatus, rawCurrency         string
@@ -137,7 +185,7 @@ func (r *WagerRepository) one(ctx context.Context, query string, args ...any) (*
 		amountMinor                                        int64
 		resultBalanceMinor                                 *int64
 	)
-	err := r.pool.QueryRow(ctx, query, args...).Scan(
+	err := q.QueryRow(ctx, query, args...).Scan(
 		&p.ID, &rawOrigin, &rawKind, &rawStatus, &p.WalletID, &p.PlayerID, &rawCurrency, &amountMinor,
 		&providerID, &externalID, &key, &hash,
 		&roundID, &gameID, &referenceExternalID, &referenceID,

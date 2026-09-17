@@ -29,6 +29,17 @@ var (
 	ErrUnsupportedKind    = errors.New("wageringapp: kind is not handled yet")
 )
 
+// Reference is the operation a REFUND or ROLLBACK undoes, read by the
+// repository inside the same transaction so the decision and the row it rests
+// on cannot drift apart (§7).
+type Reference struct {
+	Transaction *wagering.WagerTransaction
+	// Reversed reports that a REFUND or ROLLBACK over this reference already
+	// succeeded. One successful reversal per reference, whatever its kind:
+	// allowing one of each would return the same debit twice (A.8.1).
+	Reversed bool
+}
+
 // Decide runs inside the repository's SQL transaction with the wallet row
 // already locked. It settles the transaction's own state, and returns the
 // movement — nil when the operation moved no money — together with the events
@@ -36,7 +47,10 @@ var (
 //
 // w is nil when no wallet carries that id. That is a rejection like any other
 // and is still recorded, because §11 owes every rejection an event.
-type Decide func(w *wallet.Wallet) (*wallet.LedgerEntry, []events.Envelope, error)
+//
+// ref is nil for a kind that needs none, and for a reversal whose reference has
+// not arrived.
+type Decide func(w *wallet.Wallet, ref *Reference) (*wallet.LedgerEntry, []events.Envelope, error)
 
 // Process owns the whole commit rather than handing out a transaction handle: a
 // caller holding one could commit half of it (§5.3).
@@ -107,12 +121,6 @@ func (s *Service) Submit(ctx context.Context, p SubmitParams) (Result, error) {
 		return Result{}, err
 	}
 
-	// After the constructor, so OPENING is refused by the domain rule that owns
-	// it (A.1); before the repository, so no record is left. 12 deletes this.
-	if t.Kind().IsReversal() {
-		return Result{}, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
-	}
-
 	// No pre-read: the unique violation is the only duplicate check that also
 	// holds against a submission racing this one in another process.
 	err = s.repo.Process(ctx, t, s.decide(t, now))
@@ -145,7 +153,7 @@ func (s *Service) replay(ctx context.Context, p SubmitParams, hash string) (Resu
 // The balance reported here is the one a replay returns, even after later
 // movements (§9).
 func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
-	return func(w *wallet.Wallet) (*wallet.LedgerEntry, []events.Envelope, error) {
+	return func(w *wallet.Wallet, ref *Reference) (*wallet.LedgerEntry, []events.Envelope, error) {
 		// One code for "no such wallet" and "not this player's wallet": telling
 		// them apart would enumerate wallets (§2). Neither has a balance to
 		// report, so the rejection carries the zero Money (04 §7).
@@ -156,32 +164,109 @@ func (s *Service) decide(t *wagering.WagerTransaction, now time.Time) Decide {
 			return s.reject(t, wagering.FailureCurrencyMismatch, w.Balance(), now)
 		}
 
-		var (
-			entry *wallet.LedgerEntry
-			err   error
-		)
 		switch t.Kind() {
 		case wagering.KindBet:
-			entry, err = w.Debit(s.ids.NewID(), t.ID(), t.Amount(), now)
+			entry, err := w.Debit(s.ids.NewID(), t.ID(), t.Amount(), now)
+			return s.settle(t, w, entry, err, wagering.FailureInsufficientFunds, now)
 		case wagering.KindWin:
-			entry, err = w.Credit(s.ids.NewID(), t.ID(), t.Amount(), now)
+			entry, err := w.Credit(s.ids.NewID(), t.ID(), t.Amount(), now)
+			return s.settle(t, w, entry, err, wagering.FailureInsufficientFunds, now)
 		case wagering.KindLoss:
 			// §7: no movement — the money already left on the BET.
-		default:
-			return nil, nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
+			return s.settle(t, w, nil, nil, "", now)
+		case wagering.KindRefund, wagering.KindRollback:
+			return s.reverse(t, w, ref, now)
 		}
-
-		switch {
-		case errors.Is(err, wallet.ErrInsufficientFunds):
-			return s.reject(t, wagering.FailureInsufficientFunds, w.Balance(), now)
-		case err != nil:
-			return nil, nil, err
-		}
-		if err := t.MarkProcessed(w.Balance(), now); err != nil {
-			return nil, nil, err
-		}
-		return entry, s.outbox(t, entry, w.Version(), now), nil
+		return nil, nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind())
 	}
+}
+
+// reverse applies §7's reversal rules against the resolved reference. Checks
+// run before the movement, so a refused reversal leaves the wallet untouched.
+func (s *Service) reverse(t *wagering.WagerTransaction, w *wallet.Wallet, ref *Reference, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
+	// Absent, or present but not finished: both are references that are not
+	// available yet, which §7 waits for rather than refuses (A.8.2). 13 adds the
+	// worker that retries and expires the wait.
+	if ref == nil || !ref.Transaction.Status().IsTerminal() {
+		if ref != nil {
+			if err := t.ResolveReference(ref.Transaction.ID()); err != nil {
+				return nil, nil, err
+			}
+		}
+		if err := t.MarkPendingReference(now); err != nil {
+			return nil, nil, err
+		}
+		return nil, s.outbox(t, nil, 0, now), nil
+	}
+
+	r := ref.Transaction
+	if err := t.ResolveReference(r.ID()); err != nil {
+		return nil, nil, err
+	}
+
+	direction, reversible := reversalDirection(t.Kind(), r.Kind())
+	switch {
+	case r.Status() != wagering.StatusProcessed:
+		return s.reject(t, wagering.FailureReferenceNotProcessed, w.Balance(), now)
+	case !reversible || !agrees(t, r):
+		return s.reject(t, wagering.FailureReferenceMismatch, w.Balance(), now)
+	case ref.Reversed:
+		return s.reject(t, wagering.FailureReferenceAlreadyReversed, w.Balance(), now)
+	}
+	// By value, never by the text received: "25" and "25.00" are one amount
+	// (A.3.1). The currencies already agree, so Cmp cannot error.
+	if cmp, _ := t.Amount().Cmp(r.Amount()); cmp != 0 {
+		return s.reject(t, wagering.FailureReferenceAmount, w.Balance(), now)
+	}
+
+	var (
+		entry *wallet.LedgerEntry
+		err   error
+	)
+	if direction == wallet.DirectionDebit {
+		entry, err = w.Debit(s.ids.NewID(), t.ID(), t.Amount(), now)
+	} else {
+		entry, err = w.Credit(s.ids.NewID(), t.ID(), t.Amount(), now)
+	}
+	return s.settle(t, w, entry, err, wagering.FailureReversalExceedsBalance, now)
+}
+
+// §7's reversal table. A REFUND returns a BET; a ROLLBACK undoes a processed
+// BET, WIN or REFUND with the opposite movement. Anything else — a REFUND of a
+// WIN, a ROLLBACK of a LOSS or of a ROLLBACK — has no entry in that table.
+func reversalDirection(kind, referenced wagering.Kind) (wallet.Direction, bool) {
+	switch {
+	case referenced == wagering.KindBet:
+		return wallet.DirectionCredit, kind == wagering.KindRefund || kind == wagering.KindRollback
+	case referenced == wagering.KindWin || referenced == wagering.KindRefund:
+		return wallet.DirectionDebit, kind == wagering.KindRollback
+	}
+	return "", false
+}
+
+// §7: the operation and its reference must agree on provider, player, wallet,
+// currency and round. Provider is absent because the lookup is keyed by it.
+func agrees(t, r *wagering.WagerTransaction) bool {
+	return t.PlayerID() == r.PlayerID() &&
+		t.WalletID() == r.WalletID() &&
+		t.RoundID() == r.RoundID() &&
+		t.Amount().Currency() == r.Amount().Currency()
+}
+
+// settle turns the movement's outcome into the transaction's own. overdrawn is
+// the code for a refused debit, which §7 requires differ between a bet and a
+// reversal.
+func (s *Service) settle(t *wagering.WagerTransaction, w *wallet.Wallet, entry *wallet.LedgerEntry, err error, overdrawn wagering.FailureCode, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {
+	switch {
+	case errors.Is(err, wallet.ErrInsufficientFunds):
+		return s.reject(t, overdrawn, w.Balance(), now)
+	case err != nil:
+		return nil, nil, err
+	}
+	if err := t.MarkProcessed(w.Balance(), now); err != nil {
+		return nil, nil, err
+	}
+	return entry, s.outbox(t, entry, w.Version(), now), nil
 }
 
 func (s *Service) reject(t *wagering.WagerTransaction, code wagering.FailureCode, balance money.Money, now time.Time) (*wallet.LedgerEntry, []events.Envelope, error) {

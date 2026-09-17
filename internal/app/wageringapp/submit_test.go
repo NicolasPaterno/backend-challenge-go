@@ -49,7 +49,14 @@ func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, deci
 	if found != nil && found.ID() != t.WalletID() {
 		found = nil
 	}
-	entry, outbox, err := decide(found)
+	var ref *Reference
+	if t.Kind().IsReversal() {
+		if referenced := r.byExternal[t.ProviderID()+"|"+t.ReferenceExternalTransactionID()]; referenced != nil {
+			ref = &Reference{Transaction: referenced, Reversed: r.reversed(referenced.ID())}
+		}
+	}
+
+	entry, outbox, err := decide(found, ref)
 	if err != nil {
 		return err
 	}
@@ -60,6 +67,18 @@ func (r *fakeRepo) Process(_ context.Context, t *wagering.WagerTransaction, deci
 	r.byKey[t.ProviderID()+"|"+t.IdempotencyKey()] = t
 	r.byExternal[t.ProviderID()+"|"+t.ExternalTransactionID()] = t
 	return nil
+}
+
+// A.8.1's rule as the partial unique index of 0009 enforces it: any successful
+// reversal spends the reference, whatever its kind.
+func (r *fakeRepo) reversed(referenceID uuid.UUID) bool {
+	for _, t := range r.byKey {
+		if t.Kind().IsReversal() && t.Status() == wagering.StatusProcessed &&
+			t.ReferenceTransactionID() == referenceID {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *fakeRepo) ByID(_ context.Context, id uuid.UUID) (*wagering.WagerTransaction, error) {
@@ -324,15 +343,12 @@ func TestSubmitRejectsALossInTheWrongCurrency(t *testing.T) {
 	}
 }
 
-func TestSubmitRefusesOpeningAndUnhandledKinds(t *testing.T) {
+func TestSubmitRefusesOpening(t *testing.T) {
 	service, _, p := fixture(t, "100.00")
-	p.ReferenceExternalTransactionID = "transaction-122"
+	p.Kind = wagering.KindOpening
 
-	for _, kind := range []wagering.Kind{wagering.KindOpening, wagering.KindRefund, wagering.KindRollback} {
-		p.Kind = kind
-		if _, err := service.Submit(context.Background(), p); err == nil {
-			t.Errorf("Submit(%s) succeeded; only BET, WIN and LOSS are handled here", kind)
-		}
+	if _, err := service.Submit(context.Background(), p); !errors.Is(err, wagering.ErrOpeningIsInternal) {
+		t.Errorf("Submit(OPENING) error = %v, want ErrOpeningIsInternal", err)
 	}
 }
 
