@@ -20,6 +20,7 @@ func setEnv(t *testing.T, env map[string]string) {
 		"OIDC_ISSUER_URL", "OIDC_DISCOVERY_URL", "OIDC_AUDIENCE",
 		"AWS_REGION", "AWS_ENDPOINT_URL", "OUTBOX_QUEUE_URL",
 		"OUTBOX_POLL_INTERVAL", "OUTBOX_PUBLISH_WINDOW", "OUTBOX_BATCH_SIZE",
+		"REFERENCE_POLL_INTERVAL", "REFERENCE_BATCH_SIZE", "REFERENCE_TTL",
 	} {
 		t.Setenv(key, "")
 	}
@@ -53,6 +54,11 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 	if cfg.OutboxPollInterval != time.Second || cfg.OutboxBatchSize != 100 {
 		t.Errorf("outbox defaults = (%v, %d), want (1s, 100)", cfg.OutboxPollInterval, cfg.OutboxBatchSize)
+	}
+	if cfg.ReferencePollInterval != time.Second || cfg.ReferenceBatchSize != 100 ||
+		cfg.ReferenceTTL != 24*time.Hour {
+		t.Errorf("reference defaults = (%v, %d, %v), want (1s, 100, 24h0m0s)",
+			cfg.ReferencePollInterval, cfg.ReferenceBatchSize, cfg.ReferenceTTL)
 	}
 	// The API is normally reachable under one name, so discovery follows the issuer.
 	if cfg.OIDCDiscoveryURL != cfg.OIDCIssuerURL {

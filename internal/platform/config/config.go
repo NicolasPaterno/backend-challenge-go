@@ -37,6 +37,10 @@ type Config struct {
 	OutboxPollInterval  time.Duration
 	OutboxPublishWindow time.Duration
 	OutboxBatchSize     int
+
+	ReferencePollInterval time.Duration
+	ReferenceBatchSize    int
+	ReferenceTTL          time.Duration
 }
 
 // Load reports every problem at once, so a misconfigured deployment is not
@@ -105,6 +109,18 @@ func Load() (Config, error) {
 	batchSize, batchErr := intEnv("OUTBOX_BATCH_SIZE", 100, 1)
 	errs = append(errs, batchErr)
 	cfg.OutboxBatchSize = batchSize
+
+	var referencePollErr, ttlErr error
+	cfg.ReferencePollInterval, referencePollErr = durationEnv("REFERENCE_POLL_INTERVAL", time.Second)
+	// §7 asks for a maximum attempt count or a TTL; this is the TTL, measured
+	// from the operation's created_at. On expiry the reversal is REJECTED with
+	// REFERENCE_NOT_FOUND.
+	cfg.ReferenceTTL, ttlErr = durationEnv("REFERENCE_TTL", 24*time.Hour)
+	errs = append(errs, referencePollErr, ttlErr)
+
+	referenceBatch, referenceBatchErr := intEnv("REFERENCE_BATCH_SIZE", 100, 1)
+	errs = append(errs, referenceBatchErr)
+	cfg.ReferenceBatchSize = referenceBatch
 
 	maxConns, maxErr := intEnv("DB_MAX_CONNS", 10, 1)
 	minConns, minErr := intEnv("DB_MIN_CONNS", 1, 0)
