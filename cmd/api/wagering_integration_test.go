@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -39,7 +40,11 @@ func startWagering(t *testing.T) *wagering {
 	databaseURL := testsupport.PostgresMigrated(t)
 	t.Setenv("DATABASE_URL", databaseURL)
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
-	t.Setenv("LOG_LEVEL", "error")
+	// Quiet unless a test wants the lines themselves, as the log-scrubbing one
+	// does.
+	if os.Getenv("LOG_LEVEL") == "" {
+		t.Setenv("LOG_LEVEL", "error")
+	}
 	// The reference worker's cadence, so a wait resolves inside a test rather
 	// than on the one-second production tick.
 	t.Setenv("REFERENCE_POLL_INTERVAL", "200ms")
