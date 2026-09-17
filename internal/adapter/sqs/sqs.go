@@ -20,8 +20,8 @@ func NewClient(cfg config.Config) (*awssqs.Client, error) {
 	}
 	return awssqs.NewFromConfig(awsCfg, func(o *awssqs.Options) {
 		// Empty outside Compose and the tests, where the real endpoint applies.
-		if cfg.AWSEndpointURL != "" {
-			o.BaseEndpoint = &cfg.AWSEndpointURL
+		if cfg.SQSEndpoint != "" {
+			o.BaseEndpoint = &cfg.SQSEndpoint
 		}
 	}), nil
 }
@@ -32,7 +32,7 @@ type Publisher struct {
 }
 
 func NewPublisher(client *awssqs.Client, cfg config.Config) *Publisher {
-	return &Publisher{client: client, queueURL: cfg.OutboxQueueURL}
+	return &Publisher{client: client, queueURL: cfg.EventsQueueURL}
 }
 
 // The group is the aggregate, so one wallet's events stay ordered while

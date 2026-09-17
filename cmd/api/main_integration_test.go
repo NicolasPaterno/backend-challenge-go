@@ -61,7 +61,9 @@ func TestStartFailsWhenPostgresIsUnreachable(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("STARTUP_TIMEOUT", "5s")
 	t.Setenv("LOG_LEVEL", "error")
-	t.Setenv("OUTBOX_QUEUE_URL", "http://127.0.0.1:1/000000000000/events.fifo")
+	t.Setenv("SQS_EVENTS_QUEUE_URL", "http://127.0.0.1:1/000000000000/events.fifo")
+	t.Setenv("SQS_WAGER_TRANSACTIONS_QUEUE_URL", "http://127.0.0.1:1/000000000000/wagers.fifo")
+	t.Setenv("SQS_WAGER_TRANSACTIONS_DLQ_URL", "http://127.0.0.1:1/000000000000/wagers-dlq.fifo")
 	testsupport.KeycloakEnv(t)
 
 	fxApp := fx.New(options(), fx.NopLogger, fx.StartTimeout(20*time.Second))
@@ -88,7 +90,9 @@ func TestPortInUseFailsStartup(t *testing.T) {
 	t.Setenv("DATABASE_URL", testsupport.PostgresMigrated(t))
 	t.Setenv("HTTP_ADDR", listener.Addr().String())
 	t.Setenv("LOG_LEVEL", "error")
-	t.Setenv("OUTBOX_QUEUE_URL", "http://127.0.0.1:1/000000000000/events.fifo")
+	t.Setenv("SQS_EVENTS_QUEUE_URL", "http://127.0.0.1:1/000000000000/events.fifo")
+	t.Setenv("SQS_WAGER_TRANSACTIONS_QUEUE_URL", "http://127.0.0.1:1/000000000000/wagers.fifo")
+	t.Setenv("SQS_WAGER_TRANSACTIONS_DLQ_URL", "http://127.0.0.1:1/000000000000/wagers-dlq.fifo")
 	testsupport.KeycloakEnv(t)
 
 	fxApp := fx.New(options(), fx.NopLogger)

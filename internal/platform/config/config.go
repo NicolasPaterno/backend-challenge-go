@@ -30,10 +30,13 @@ type Config struct {
 	OIDCDiscoveryURL string
 	OIDCAudience     string
 
-	AWSRegion      string
-	AWSEndpointURL string
+	AWSRegion   string
+	SQSEndpoint string
 
-	OutboxQueueURL      string
+	WagerQueueURL  string
+	WagerDLQURL    string
+	EventsQueueURL string
+
 	OutboxPollInterval  time.Duration
 	OutboxPublishWindow time.Duration
 	OutboxBatchSize     int
@@ -73,11 +76,22 @@ func Load() (Config, error) {
 	cfg.OIDCDiscoveryURL = envOr("OIDC_DISCOVERY_URL", cfg.OIDCIssuerURL)
 
 	cfg.AWSRegion = envOr("AWS_REGION", "us-east-1")
-	cfg.AWSEndpointURL = os.Getenv("AWS_ENDPOINT_URL")
+	// LocalStack's address; empty means the real service (§4).
+	cfg.SQSEndpoint = os.Getenv("SQS_ENDPOINT")
 
-	cfg.OutboxQueueURL = os.Getenv("OUTBOX_QUEUE_URL")
-	if cfg.OutboxQueueURL == "" {
-		fail("OUTBOX_QUEUE_URL is required")
+	// §10 names all three: the inbound queue, its dead-letter queue — which the
+	// consumer sends permanent failures to directly — and the outbound one.
+	for _, required := range []struct {
+		key  string
+		into *string
+	}{
+		{"SQS_WAGER_TRANSACTIONS_QUEUE_URL", &cfg.WagerQueueURL},
+		{"SQS_WAGER_TRANSACTIONS_DLQ_URL", &cfg.WagerDLQURL},
+		{"SQS_EVENTS_QUEUE_URL", &cfg.EventsQueueURL},
+	} {
+		if *required.into = os.Getenv(required.key); *required.into == "" {
+			fail("%s is required", required.key)
+		}
 	}
 
 	if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {

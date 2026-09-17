@@ -5,6 +5,7 @@ package testsupport
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -63,28 +64,87 @@ func SQSClient(t *testing.T, endpoint string) *awssqs.Client {
 	return awssqs.NewFromConfig(cfg, func(o *awssqs.Options) { o.BaseEndpoint = &endpoint })
 }
 
-// SQSEnv creates a queue of its own for this test and points the process under
-// test at it.
+// SQSEnv gives this test its own pair of queues — outbound, inbound and the
+// inbound one's dead-letter queue — and points the process under test at them.
+// The inbound url is read back with InboundQueue.
 func SQSEnv(t *testing.T) (client *awssqs.Client, queueURL string) {
 	t.Helper()
 
 	endpoint := SQSEndpoint(t)
 	client = SQSClient(t, endpoint)
+	unique := time.Now().UnixNano()
 
-	name := fmt.Sprintf("events-%d.fifo", time.Now().UnixNano())
+	outbound := createFIFO(t, client, fmt.Sprintf("events-%d.fifo", unique), nil)
+	deadLetter := createFIFO(t, client, fmt.Sprintf("wagers-dlq-%d.fifo", unique), nil)
+
+	arns, err := client.GetQueueAttributes(context.Background(), &awssqs.GetQueueAttributesInput{
+		QueueUrl: &deadLetter, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn},
+	})
+	if err != nil {
+		t.Fatalf("read the dead-letter queue arn: %v", err)
+	}
+
+	// The same redrive policy Compose provisions, so a test sees the attempts
+	// run out the way production would (§10).
+	inbound := createFIFO(t, client, fmt.Sprintf("wagers-%d.fifo", unique), map[string]string{
+		"VisibilityTimeout": "2",
+		"RedrivePolicy": fmt.Sprintf(`{"deadLetterTargetArn":%q,"maxReceiveCount":"2"}`,
+			arns.Attributes[string(types.QueueAttributeNameQueueArn)]),
+	})
+
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("SQS_ENDPOINT", endpoint)
+	t.Setenv("SQS_EVENTS_QUEUE_URL", outbound)
+	t.Setenv("SQS_WAGER_TRANSACTIONS_QUEUE_URL", inbound)
+	t.Setenv("SQS_WAGER_TRANSACTIONS_DLQ_URL", deadLetter)
+
+	return client, outbound
+}
+
+// InboundQueue and InboundDLQ report what SQSEnv provisioned for this test.
+func InboundQueue(t *testing.T) string { return envOrFail(t, "SQS_WAGER_TRANSACTIONS_QUEUE_URL") }
+
+func InboundDLQ(t *testing.T) string { return envOrFail(t, "SQS_WAGER_TRANSACTIONS_DLQ_URL") }
+
+func envOrFail(t *testing.T, key string) string {
+	t.Helper()
+
+	value := os.Getenv(key)
+	if value == "" {
+		t.Fatalf("%s is unset; call SQSEnv first", key)
+	}
+	return value
+}
+
+func createFIFO(t *testing.T, client *awssqs.Client, name string, attributes map[string]string) string {
+	t.Helper()
+
+	if attributes == nil {
+		attributes = map[string]string{}
+	}
+	attributes["FifoQueue"] = "true"
+
 	created, err := client.CreateQueue(context.Background(), &awssqs.CreateQueueInput{
-		QueueName:  &name,
-		Attributes: map[string]string{"FifoQueue": "true"},
+		QueueName: &name, Attributes: attributes,
 	})
 	if err != nil {
 		t.Fatalf("create queue %s: %v", name, err)
 	}
+	return *created.QueueUrl
+}
 
-	t.Setenv("AWS_REGION", "us-east-1")
-	t.Setenv("AWS_ENDPOINT_URL", endpoint)
-	t.Setenv("OUTBOX_QUEUE_URL", *created.QueueUrl)
+// Send puts one message on a FIFO queue, grouped by wallet as §10 specifies.
+func Send(t *testing.T, client *awssqs.Client, queueURL, body, group, dedup string) {
+	t.Helper()
 
-	return client, *created.QueueUrl
+	if _, err := client.SendMessage(context.Background(), &awssqs.SendMessageInput{
+		QueueUrl:               &queueURL,
+		MessageBody:            &body,
+		MessageGroupId:         &group,
+		MessageDeduplicationId: &dedup,
+	}); err != nil {
+		t.Fatalf("send to %s: %v", queueURL, err)
+	}
 }
 
 // ReceiveAll drains the queue until it is empty for one long poll, so a test

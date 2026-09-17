@@ -18,7 +18,8 @@ func setEnv(t *testing.T, env map[string]string) {
 		"HTTP_READ_HEADER_TIMEOUT", "SHUTDOWN_TIMEOUT", "STARTUP_TIMEOUT",
 		"DB_MAX_CONNS", "DB_MIN_CONNS",
 		"OIDC_ISSUER_URL", "OIDC_DISCOVERY_URL", "OIDC_AUDIENCE",
-		"AWS_REGION", "AWS_ENDPOINT_URL", "OUTBOX_QUEUE_URL",
+		"AWS_REGION", "SQS_ENDPOINT", "SQS_WAGER_TRANSACTIONS_QUEUE_URL",
+		"SQS_WAGER_TRANSACTIONS_DLQ_URL", "SQS_EVENTS_QUEUE_URL",
 		"OUTBOX_POLL_INTERVAL", "OUTBOX_PUBLISH_WINDOW", "OUTBOX_BATCH_SIZE",
 		"REFERENCE_POLL_INTERVAL", "REFERENCE_BATCH_SIZE", "REFERENCE_TTL",
 	} {
@@ -26,7 +27,9 @@ func setEnv(t *testing.T, env map[string]string) {
 	}
 	t.Setenv("OIDC_ISSUER_URL", "http://localhost:8081/realms/wagering")
 	t.Setenv("OIDC_AUDIENCE", "wagering-api")
-	t.Setenv("OUTBOX_QUEUE_URL", "http://localhost:4566/000000000000/wager-events.fifo")
+	t.Setenv("SQS_WAGER_TRANSACTIONS_QUEUE_URL", "http://localhost:4566/000000000000/wager-transactions.fifo")
+	t.Setenv("SQS_WAGER_TRANSACTIONS_DLQ_URL", "http://localhost:4566/000000000000/wager-transactions-dlq.fifo")
+	t.Setenv("SQS_EVENTS_QUEUE_URL", "http://localhost:4566/000000000000/wager-events.fifo")
 	for key, value := range env {
 		t.Setenv(key, value)
 	}
@@ -117,12 +120,26 @@ func TestLoadRejectsInvalidEnvironment(t *testing.T) {
 			},
 			want: "OIDC_ISSUER_URL is required",
 		},
-		"missing outbox queue": {
+		"missing inbound queue": {
 			env: map[string]string{
-				"DATABASE_URL":     "postgres://localhost/db",
-				"OUTBOX_QUEUE_URL": "",
+				"DATABASE_URL":                     "postgres://localhost/db",
+				"SQS_WAGER_TRANSACTIONS_QUEUE_URL": "",
 			},
-			want: "OUTBOX_QUEUE_URL is required",
+			want: "SQS_WAGER_TRANSACTIONS_QUEUE_URL is required",
+		},
+		"missing dead-letter queue": {
+			env: map[string]string{
+				"DATABASE_URL":                   "postgres://localhost/db",
+				"SQS_WAGER_TRANSACTIONS_DLQ_URL": "",
+			},
+			want: "SQS_WAGER_TRANSACTIONS_DLQ_URL is required",
+		},
+		"missing events queue": {
+			env: map[string]string{
+				"DATABASE_URL":         "postgres://localhost/db",
+				"SQS_EVENTS_QUEUE_URL": "",
+			},
+			want: "SQS_EVENTS_QUEUE_URL is required",
 		},
 		"missing audience": {
 			env: map[string]string{
