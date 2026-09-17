@@ -25,6 +25,7 @@ cp .env.example .env
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `DATABASE_URL` | — | **Required.** PostgreSQL connection string |
 | `DB_MAX_CONNS` / `DB_MIN_CONNS` | `10` / `1` | Connection pool bounds |
+| `DB_LOCK_TIMEOUT` | `3s` | How long a statement waits for a contended row before failing |
 | `SHUTDOWN_TIMEOUT` | `15s` | Budget for draining in-flight requests on `SIGTERM` |
 | `STARTUP_TIMEOUT` | `15s` | Budget for the dependency checks at boot |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Slow-header protection |
@@ -56,15 +57,15 @@ volume.
 
 ## Authentication
 
-Every wallet route requires a validated OIDC access token (§2); the health
-checks stay public. Keycloak imports `keycloak/realm.json` on start, which
+Every wallet and operation route requires a validated OIDC access token (§2);
+the health checks stay public. Keycloak imports `keycloak/realm.json` on start, which
 provisions the realm `wagering` and these `client_credentials` clients — local
 secrets, all of the form `<clientId>-secret`:
 
 | Client | Carries | Allowed on |
 | --- | --- | --- |
 | `internal-service` | the `wallets` scope | the wallet routes |
-| `provider-a`, `provider-b` | `provider_id` | provider routes, from story 08 |
+| `provider-a`, `provider-b` | the `wagering` scope and `provider_id` | the operation routes, each only its own transactions |
 | `provider-expiring` | a one-second token | nothing; it exists for the expiry test |
 | `outsider` | another audience | nothing; it exists for the audience test |
 
@@ -90,7 +91,11 @@ curl -i http://localhost:8080/wallets \
 
 A missing, malformed, expired or wrong-audience token gets `401` with a
 `WWW-Authenticate: Bearer` header; a valid provider token on a wallet route gets
-`403`. Both are `application/problem+json` and neither carries wallet data.
+`403`, as does the internal token on an operation route. All are
+`application/problem+json` and none carries wallet data.
+
+`docs/wagering.md` covers submitting an operation: the idempotency rules, the
+payload hash, the per-wallet locking, and the full status-code table.
 
 ## Migrations
 
