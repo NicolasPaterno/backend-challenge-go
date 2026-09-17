@@ -63,6 +63,8 @@ API.
 
 ```sh
 curl -i http://localhost:8080/health/live
+curl -i http://localhost:8080/health/ready
+curl -s http://localhost:8080/metrics
 # HTTP/1.1 200 OK
 # {"status":"ok"}
 ```
