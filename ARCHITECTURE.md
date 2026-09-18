@@ -36,7 +36,7 @@ Nenhuma invariante financeira depende só do código Go.
 | `wallets_player_currency_unique` | uma carteira por `(playerId, currency)` |
 | `wallet_ledger_entries_wallet_transaction_unique` | um lançamento por `(wallet_id, transaction_id)` |
 | `wallet_ledger_entries_equation` | `balanceAfter = balanceBefore ± amount`, conforme a direção |
-| `wallet_ledger_entries_append_only` (trigger) | `UPDATE`/`DELETE` levantam `restrict_violation`, inclusive para sessões administrativas |
+| `wallet_ledger_entries_append_only` e `_no_truncate` (triggers) | `UPDATE`, `DELETE` e `TRUNCATE` levantam `restrict_violation`, inclusive para sessões administrativas |
 | `wager_transactions_opening_unique` (parcial) | uma `OPENING` por carteira, qualquer que seja o UUID |
 | `wager_transactions_origin_fields` | `INTERNAL ⇔ OPENING` com as colunas externas `NULL`; `EXTERNAL ⇒` não-`OPENING` com elas preenchidas |
 | `wager_transactions_provider_key_unique` | um registro por `(provider_id, idempotency_key)` |
@@ -603,13 +603,15 @@ onde deve cair: no corpo, no log e na métrica.
 
 | Suíte | Comando | O que cobre |
 | --- | --- | --- |
-| Unitária | `go test -race./...` | `Money`, invariantes da carteira, transições, as regras dos cinco tipos externos, conflito de payload, política de valor zero, abertura interna com seus eventos |
-| Integração | `go test -race -tags=integration./...` | Postgres, Keycloak e LocalStack reais: migrations, constraints, imutabilidade do ledger, atomicidade, inbox, reentrega, DLQ, outbox concorrente, recuperação, composição Fx com start e stop |
-| Multi-instância | `go test -race -tags 'integration,system'./test/system/...` | **três processos independentes** contra containers compartilhados |
+| Unitária | `go test -race ./...` | `Money`, invariantes da carteira, transições, as regras dos cinco tipos externos, conflito de payload, política de valor zero, abertura interna com seus eventos |
+| Integração | `go test -race -tags=integration ./...` | Postgres, Keycloak e LocalStack reais: migrations, constraints, imutabilidade do ledger, atomicidade, inbox, reentrega, DLQ, outbox concorrente, recuperação, composição Fx com start e stop |
+| Multi-instância | `go test -race -tags 'integration,system' ./test/system/...` | **três processos independentes** contra containers compartilhados |
 
 A suíte de integração cobre ainda **a mesma operação pelos dois transportes**: uma `BET` por HTTP
 e a mesma operação por SQS, com o valor escrito de outra forma, deixam um único débito
-(`TestTheSameOperationOverHTTPAndSQSAppliesOnce`) — é o digest da seção 4 observado de fora.
+(`TestTheSameOperationOverHTTPAndSQSAppliesOnce`) — é o digest da seção 4 observado de fora. As duas
+entradas disputando a mesma operação em paralelo também deixam um único débito, com cada chegada
+perdedora contada como replay (`TestHTTPAndSQSRacingForOneOperationApplyItOnce`).
 
 A suíte de sistema compila o binário com o detector de corrida e sobe três processos, cada um com
 suas conexões e memória. Ela cobre: a mesma aposta cinquenta vezes com o valor escrito de três

@@ -391,7 +391,7 @@ são as build tags das seções 7.2 e 7.3. Os testes sem pacote indicado estão 
 | 7 | `REFUND`/`ROLLBACK` antes da referência: resolução posterior, ou rejeição por expiração | `TestAReversalDeliveredBeforeItsReferenceResolvesLater`, `TestAWaitExpiresIntoAReferenceNotFoundRejection` | integration |
 | 8 | Reinício preserva idempotência, trabalho pendente e consistência; outra instância assume | `TestAWaitSurvivesARestartAndIsResumedByAnotherInstance` | integration |
 |   | … a instância morre, outra assume, e a aposta reenviada é replay com o saldo original | `TestAPendingReferenceIsTakenOverByAnotherInstance` | system |
-| — | A mesma operação por HTTP e por SQS, um único débito | `TestTheSameOperationOverHTTPAndSQSAppliesOnce` | integration |
+| — | A mesma operação por HTTP e por SQS, um único débito | `TestTheSameOperationOverHTTPAndSQSAppliesOnce`, `TestHTTPAndSQSRacingForOneOperationApplyItOnce` (as duas entradas em paralelo) | integration |
 
 ### 8.2. Autenticação e autorização (§13)
 
@@ -410,7 +410,7 @@ são as build tags das seções 7.2 e 7.3. Os testes sem pacote indicado estão 
 | acesso não autorizado a operações ou transações | `TestProvidersAreIsolated`, `TestUnauthorizedReadExposesNoWalletData` | integration |
 | cálculo monetário em ponto flutuante | `TestInternalContainsNoFloat` (`./internal/domain`) — varre todo `internal/` com `go/ast` | — |
 | saldo negativo por concorrência | `TestTwoBetsRaceForOneBalance`, `TestTwoBetsOfEightyRaceForOneHundredAcrossInstances`; o `CHECK` no banco por `TestSchemaEnforcesTheFinancialInvariants` (`./internal/adapter/postgres`) | integration, system |
-| movimentação de saldo duplicada | `TestSameBetInParallelDebitsOnce`, `TestARedeliveredMessageDebitsOnce`, `TestTheSameOperationOverHTTPAndSQSAppliesOnce`, `TestTwoReversalsRacingForOneBetReturnItOnce`, `TestTheSchemaRefusesASecondSuccessfulReversal` | integration |
+| movimentação de saldo duplicada | `TestSameBetInParallelDebitsOnce`, `TestARedeliveredMessageDebitsOnce`, `TestTheSameOperationOverHTTPAndSQSAppliesOnce`, `TestHTTPAndSQSRacingForOneOperationApplyItOnce`, `TestTwoReversalsRacingForOneBetReturnItOnce`, `TestTheSchemaRefusesASecondSuccessfulReversal` | integration |
 | idempotência só em memória | `TestAWaitSurvivesARestartAndIsResumedByAnotherInstance`, `TestAPendingReferenceIsTakenOverByAnotherInstance` | integration, system |
 | depender de uma única instância | toda a suíte `./test/system` | system |
 | publicar antes do commit | `TestOutcomesWriteTheirEventsToTheOutbox`, `TestARowLostBetweenSendAndConfirmationIsRepublishedUnchanged` | integration |
@@ -422,7 +422,7 @@ Rodar só os desclassificatórios:
 ```sh
 go test -race ./internal/domain/... ./internal/adapter/httpapi/...
 go test -race -tags=integration -timeout 20m -v ./cmd/api ./internal/adapter/postgres ./internal/platform/auth \
-  -run 'TestWalletRoutesAcceptOnlyTheInternalService|TestVerifyRefusesTokensThisAPIMustNotAccept|TestProvidersAreIsolated|TestUnauthorizedReadExposesNoWalletData|TestTwoBetsRaceForOneBalance|TestSchemaEnforcesTheFinancialInvariants|TestSameBetInParallelDebitsOnce|TestARedeliveredMessageDebitsOnce|TestTheSameOperationOverHTTPAndSQSAppliesOnce|TestTwoReversalsRacingForOneBetReturnItOnce|TestTheSchemaRefusesASecondSuccessfulReversal|TestAWaitSurvivesARestartAndIsResumedByAnotherInstance|TestOutcomesWriteTheirEventsToTheOutbox|TestARowLostBetweenSendAndConfirmationIsRepublishedUnchanged|TestReconciliationAgreesAfterMixedOperationsAndChangesNothing'
+  -run 'TestWalletRoutesAcceptOnlyTheInternalService|TestVerifyRefusesTokensThisAPIMustNotAccept|TestProvidersAreIsolated|TestUnauthorizedReadExposesNoWalletData|TestTwoBetsRaceForOneBalance|TestSchemaEnforcesTheFinancialInvariants|TestSameBetInParallelDebitsOnce|TestARedeliveredMessageDebitsOnce|TestTheSameOperationOverHTTPAndSQSAppliesOnce|TestHTTPAndSQSRacingForOneOperationApplyItOnce|TestTwoReversalsRacingForOneBetReturnItOnce|TestTheSchemaRefusesASecondSuccessfulReversal|TestAWaitSurvivesARestartAndIsResumedByAnotherInstance|TestOutcomesWriteTheirEventsToTheOutbox|TestARowLostBetweenSendAndConfirmationIsRepublishedUnchanged|TestReconciliationAgreesAfterMixedOperationsAndChangesNothing'
 go test -race -tags 'integration,system' -timeout 40m ./test/system/...
 ```
 
@@ -506,7 +506,7 @@ O segundo comando mostra os eventos que o outbox publicou durante o roteiro.
 
 ### 9.4. Migrations
 
-Onze migrations em `migrations/`, como `NNNN_nome.up.sql` / `.down.sql`, embarcadas no binário.
+Doze migrations em `migrations/`, como `NNNN_nome.up.sql` / `.down.sql`, embarcadas no binário.
 No Compose o serviço `migrate` as aplica sozinho. Para operar à mão:
 
 | Onde | Aplicar | Reverter uma | Reverter tudo | Versão |
