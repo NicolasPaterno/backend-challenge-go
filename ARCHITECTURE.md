@@ -482,6 +482,7 @@ cada fila a política com a ação mais estreita que cada principal precisa:
 | Fila | Principal | Ação |
 | --- | --- | --- |
 | `wager-transactions.fifo` | `wagering-producer` | `sqs:SendMessage` |
+| `wager-transactions.fifo` | `wagering-api` | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` |
 | `wager-transactions-dlq.fifo` | `wagering-api` | `sqs:SendMessage`, `sqs:ReceiveMessage` |
 | `wager-events.fifo` | `wagering-api` | `sqs:SendMessage` |
 
@@ -513,7 +514,7 @@ não exigência: O enunciado só pede que as classes sejam distinguíveis (A.3.5
 | Conflito | `409` | `WALLET_ALREADY_EXISTS`, `IDEMPOTENCY_KEY_CONFLICT`, `EXTERNAL_TRANSACTION_CONFLICT` | segunda carteira para jogador e moeda; chave reusada com outro conteúdo; operação reenviada sob segunda chave |
 | Rejeição de negócio | `422` | `code` = `failureCode`, `instance` = o caminho da transação | recusa decidida contra uma transação persistida; o replay é o mesmo `422` |
 | Falha permanente registrada | `500` | `code` = `failureCode` | uma transação `FAILED` relida |
-| Indisponibilidade transitória | `503` + `Retry-After` | `SERVICE_UNAVAILABLE` | carteira disputada além do `DB_LOCK_TIMEOUT`, ou dependência inacessível — nada aplicado |
+| Indisponibilidade transitória | `503` + `Retry-After` | `SERVICE_UNAVAILABLE` | carteira disputada além do `DB_LOCK_TIMEOUT`, deadlock abortado pelo Postgres, ou dependência inacessível — nada aplicado |
 
 A separação entre `503` e `500` pergunta ao erro se ele é `SafeToRetry()`, coisa que o pgx só marca
 para falha que nunca chegou ao servidor. Custo: uma falha que chegou ao servidor mas não commitou

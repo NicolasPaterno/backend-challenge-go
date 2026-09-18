@@ -595,6 +595,20 @@ func TestProvidersAreIsolated(t *testing.T) {
 	if crossed.Status != http.StatusForbidden {
 		t.Errorf("cross-provider submission status = %d, want %d", crossed.Status, http.StatusForbidden)
 	}
+
+	// §2: isolation holds on replays too. provider-a's exact request, resent
+	// under provider-b's token, must not be answered as provider-a's replay.
+	replayed := api.bet(bet{
+		externalID: "transaction-1", key: "provider-a:transaction-1",
+		playerID: playerID, walletID: walletID, amount: "25.00", client: providerB,
+	})
+	if replayed.Status != http.StatusForbidden {
+		t.Errorf("cross-provider replay status = %d, want %d", replayed.Status, http.StatusForbidden)
+	}
+	if replayed.TransactionID != "" || replayed.IdempotentReplay || replayed.Balance != "" {
+		t.Errorf("cross-provider replay exposed provider-a's result: %+v", replayed)
+	}
+
 	if got := api.balance(walletID); got != "75.00" {
 		t.Errorf("balance = %s, want 75.00; a refused request must move no money", got)
 	}

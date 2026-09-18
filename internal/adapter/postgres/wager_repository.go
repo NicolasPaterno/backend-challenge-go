@@ -69,7 +69,7 @@ const (
 )
 
 func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransaction, inbox wageringapp.Inbox, decide wageringapp.Decide) error {
-	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		// First, so a redelivery is answered before any work is repeated, and in
 		// this transaction, so the record and what it caused commit together.
 		if !inbox.IsZero() {
@@ -132,6 +132,11 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 
 		return applyOutcome(ctx, tx, w, observed, entry, outbox)
 	})
+	// Postgres aborted this side of a lock cycle; nothing was applied.
+	if isDeadlock(err) {
+		return fmt.Errorf("%w: %w", wageringapp.ErrWalletBusy, err)
+	}
+	return err
 }
 
 // applyOutcome writes what the decision produced beyond the transaction row
@@ -173,7 +178,7 @@ const (
 	// SKIP LOCKED so a second worker moves on rather than queueing; the status
 	// predicate is what makes a record another worker already finished
 	// invisible to this one.
-	claimWaiting = selectTransaction + "id = $1 AND status = 'PENDING_REFERENCE' FOR UPDATE SKIP LOCKED"
+	claimWaiting = selectTransaction + "id = $1 AND status = 'PENDING_REFERENCE' FOR NO KEY UPDATE SKIP LOCKED"
 
 	// Doubling from one second, capped at five minutes, with the integer shift
 	// the outbox uses — power() is floating point. next_attempt_at on a

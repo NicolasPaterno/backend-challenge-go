@@ -21,12 +21,21 @@ create_fifo() {
     awslocal sqs create-queue --cli-input-json file:///tmp/queue.json > /dev/null
 }
 
+statement() {
+    principal=$1
+    queue=$2
+    actions=$3
+    printf '{"Sid":"%s","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::%s:role/%s"},"Action":%s,"Resource":"arn:aws:sqs:%s:%s:%s"}' \
+        "$principal" "$ACCOUNT" "$principal" "$actions" "$REGION" "$ACCOUNT" "$queue"
+}
+
+# A queue holds one Policy attribute: every principal's statement goes in the
+# same document, or the last call replaces the others.
 set_policy() {
     queue=$1
-    principal=$2
-    actions=$3
-    document=$(printf '{"Version":"2012-10-17","Statement":[{"Sid":"%s","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::%s:role/%s"},"Action":%s,"Resource":"arn:aws:sqs:%s:%s:%s"}]}' \
-        "$principal" "$ACCOUNT" "$principal" "$actions" "$REGION" "$ACCOUNT" "$queue" | as_json_string)
+    shift
+    statements=$(IFS=,; echo "$*")
+    document=$(printf '{"Version":"2012-10-17","Statement":[%s]}' "$statements" | as_json_string)
     printf '{"QueueUrl":"%s/%s","Attributes":{"Policy":"%s"}}' "$BASE" "$queue" "$document" > /tmp/policy.json
     awslocal sqs set-queue-attributes --cli-input-json file:///tmp/policy.json
 }
@@ -48,6 +57,10 @@ create_fifo wager-transactions.fifo ",\"VisibilityTimeout\":\"30\",\"RedrivePoli
 # policies. Each principal gets the narrowest action it needs. LocalStack's
 # community edition stores these documents but does not enforce them, which
 # ARCHITECTURE.md records as a limitation.
-set_policy wager-transactions.fifo     wagering-producer '["sqs:SendMessage"]'
-set_policy wager-transactions-dlq.fifo wagering-api      '["sqs:SendMessage","sqs:ReceiveMessage"]'
-set_policy wager-events.fifo           wagering-api      '["sqs:SendMessage"]'
+set_policy wager-transactions.fifo \
+    "$(statement wagering-producer wager-transactions.fifo '["sqs:SendMessage"]')" \
+    "$(statement wagering-api wager-transactions.fifo '["sqs:ReceiveMessage","sqs:DeleteMessage","sqs:GetQueueAttributes"]')"
+set_policy wager-transactions-dlq.fifo \
+    "$(statement wagering-api wager-transactions-dlq.fifo '["sqs:SendMessage","sqs:ReceiveMessage"]')"
+set_policy wager-events.fifo \
+    "$(statement wagering-api wager-events.fifo '["sqs:SendMessage"]')"

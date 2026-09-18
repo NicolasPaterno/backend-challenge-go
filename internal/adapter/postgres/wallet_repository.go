@@ -151,6 +151,10 @@ func isLockNotAvailable(err error) bool {
 	return hasCode(err, pgerrcode.LockNotAvailable)
 }
 
+func isDeadlock(err error) bool {
+	return hasCode(err, pgerrcode.DeadlockDetected)
+}
+
 func hasCode(err error, code string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == code
