@@ -14,7 +14,7 @@ info:
     Respostas não-2xx são `application/problem+json` (RFC 9457). As classes de erro e os
     `failureCode` estáveis estão em `ARCHITECTURE.md`, seções 5 e 10; como subir o ambiente e obter
     um token está no `README.md`.
-    
+
 servers:
   - url: http://localhost:8080
     description: Compose local

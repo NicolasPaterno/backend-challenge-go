@@ -339,8 +339,10 @@ O arquivo é escrito à mão, não gerado dos handlers — nada valida um contra
 nova precisa de edição aqui também. Para ler ou exercitar, sem instalar nada:
 
 ```sh
-docker run --rm -p 8082:8080 -e SWAGGER_JSON=/spec/openapi.yaml \
-  -v "$PWD/api:/spec" swaggerapi/swagger-ui
+docker run --rm --name api-docs -p 8082:8080 \
+  -e SWAGGER_JSON=/spec/openapi.yaml \
+  -v "$PWD/api:/spec" \
+  swaggerapi/swagger-ui
 # -> http://localhost:8082
 ```
 
