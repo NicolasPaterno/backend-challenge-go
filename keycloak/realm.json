@@ -64,6 +64,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "secret": "internal-service-secret",
+      "webOrigins": ["http://localhost:8088"],
       "defaultClientScopes": ["basic", "wagering-api-audience", "wallets"],
       "optionalClientScopes": []
     },
@@ -77,6 +78,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "secret": "provider-a-secret",
+      "webOrigins": ["http://localhost:8088"],
       "defaultClientScopes": ["basic", "wagering-api-audience", "wagering"],
       "optionalClientScopes": [],
       "protocolMappers": [
@@ -106,6 +108,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "secret": "provider-b-secret",
+      "webOrigins": ["http://localhost:8088"],
       "defaultClientScopes": ["basic", "wagering-api-audience", "wagering"],
       "optionalClientScopes": [],
       "protocolMappers": [

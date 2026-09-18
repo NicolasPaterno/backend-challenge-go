@@ -11,6 +11,17 @@ info:
     serviço interno; o escopo `wagering` é dos provedores, que alcançam **apenas as próprias**
     operações — a identidade do token, e não o corpo, determina o `providerId` autorizado.
 
+    **Como autenticar aqui:** clique em **Authorize**, preencha `client_id` e `client_secret` com
+    uma das identidades abaixo, marque **só** o escopo dela e clique em *Authorize* de novo. O
+    Swagger pede o token ao Keycloak (`client_credentials`) e o envia em toda chamada. Para trocar
+    de identidade, *Logout* e repita.
+
+    | client_id | client_secret | escopo | rotas |
+    | --- | --- | --- | --- |
+    | `internal-service` | `internal-service-secret` | `wallets` | carteiras, ledger, reconciliação |
+    | `provider-a` | `provider-a-secret` | `wagering` | operações com `providerId: provider-a` |
+    | `provider-b` | `provider-b-secret` | `wagering` | operações com `providerId: provider-b` |
+
     Respostas não-2xx são `application/problem+json` (RFC 9457). As classes de erro e os
     `failureCode` estáveis estão em `ARCHITECTURE.md`, seções 5 e 10; como subir o ambiente e obter
     um token está no `README.md`.

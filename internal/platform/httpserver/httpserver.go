@@ -56,10 +56,28 @@ func correlated(next http.Handler) http.Handler {
 	})
 }
 
+// Any origin is safe to allow: credentials are bearer tokens, which a browser
+// never attaches on its own. It exists so Swagger UI on another port can call
+// the API; the preflight is answered before auth, which would refuse it.
+func crossOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", "*")
+		h.Set("Access-Control-Expose-Headers", "Retry-After, WWW-Authenticate, "+CorrelationHeader)
+		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+			h.Set("Access-Control-Allow-Methods", "GET, POST")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, "+CorrelationHeader)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func NewServer(lc fx.Lifecycle, cfg config.Config, mux *http.ServeMux, logger *slog.Logger) *http.Server {
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           correlated(mux),
+		Handler:           crossOrigin(correlated(mux)),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 	}
 
