@@ -160,6 +160,11 @@ func TestSchemaEnforcesTheFinancialInvariants(t *testing.T) {
 			[]any{opened.ID()},
 		},
 		{
+			"truncating the ledger",
+			`TRUNCATE wallet_ledger_entries`,
+			nil,
+		},
+		{
 			"a negative balance",
 			`UPDATE wallets SET balance_minor = -1 WHERE id = $1`,
 			[]any{opened.ID()},

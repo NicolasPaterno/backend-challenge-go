@@ -1,0 +1,1 @@
+DROP TRIGGER wallet_ledger_entries_no_truncate ON wallet_ledger_entries;
