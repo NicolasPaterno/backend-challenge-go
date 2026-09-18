@@ -596,7 +596,6 @@ func TestProvidersAreIsolated(t *testing.T) {
 		t.Errorf("cross-provider submission status = %d, want %d", crossed.Status, http.StatusForbidden)
 	}
 
-	// §2: isolation holds on replays too. provider-a's exact request, resent
 	// under provider-b's token, must not be answered as provider-a's replay.
 	replayed := api.bet(bet{
 		externalID: "transaction-1", key: "provider-a:transaction-1",

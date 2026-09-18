@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"uuid"
+
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	"uuid"
 
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/metrics"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/testsupport"
@@ -114,7 +115,7 @@ func TestTheSameOperationOverHTTPAndSQSAppliesOnce(t *testing.T) {
 	api.requireConsistent(walletID)
 }
 
-// §10 asks for the two inputs to be validated concurrently, not one after the
+// asks for the two inputs to be validated concurrently, not one after the
 // other: the message and the posts race for the same wallet row and key.
 func TestHTTPAndSQSRacingForOneOperationApplyItOnce(t *testing.T) {
 	api := startWagering(t)
@@ -228,7 +229,7 @@ func TestAMessageRedeliveredAfterACommitIsANoOp(t *testing.T) {
 }
 
 // awaitReplayed proves the repeat was received and deduplicated by the
-// application (§13): the replay counter moves by exactly one, then the message
+// application: the replay counter moves by exactly one, then the message
 // leaves the queue, which the consumer does only after handling it. Waiting on
 // the balance instead would pass with a dead consumer.
 func (w *wagering) awaitReplayed(client *awssqs.Client, before int64) {
@@ -277,7 +278,7 @@ func (w *wagering) awaitInboundQueueDrained(client *awssqs.Client) {
 	}
 }
 
-// requireConsistent is the closing check §13 asks of every scenario: the stored
+// requireConsistent is the closing check 13 asks of every scenario: the stored
 // balance equals the ledger's credits minus its debits.
 func (w *wagering) requireConsistent(walletID string) {
 	w.t.Helper()
