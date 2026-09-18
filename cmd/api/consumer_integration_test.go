@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"uuid"
 
+	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/metrics"
 	"github.com/NicolasPaterno/backend-challenge-go/internal/testsupport"
 )
 
@@ -66,11 +68,10 @@ func TestARedeliveredMessageDebitsOnce(t *testing.T) {
 	api.send(client, walletID, "first", body)
 	api.awaitBalance(walletID, "75.00")
 
+	replays := metrics.Duplicates.Value()
 	api.send(client, walletID, "second", body)
+	api.awaitReplayed(client, replays)
 
-	// The second delivery must settle without moving money. Give the consumer
-	// room to get it wrong before asserting it did not.
-	time.Sleep(3 * time.Second)
 	if got := api.balance(walletID); got != "75.00" {
 		t.Errorf("balance = %s, want one debit for two deliveries", got)
 	}
@@ -80,6 +81,7 @@ func TestARedeliveredMessageDebitsOnce(t *testing.T) {
 	if got := api.inbox(); got != 1 {
 		t.Errorf("inbox rows = %d, want 1 for one messageId", got)
 	}
+	api.requireConsistent(walletID)
 }
 
 // HTTP and SQS share the use case, so one operation delivered over both
@@ -99,15 +101,62 @@ func TestTheSameOperationOverHTTPAndSQSAppliesOnce(t *testing.T) {
 	}
 
 	// The queue spells the amount differently; A.3.1 makes it the same operation.
+	replays := metrics.Duplicates.Value()
 	api.send(client, walletID, "queued", message("msg-1", "transaction-123", playerID, walletID, "BET", "25"))
+	api.awaitReplayed(client, replays)
 
-	time.Sleep(3 * time.Second)
 	if got := api.balance(walletID); got != "75.00" {
 		t.Errorf("balance = %s, want one debit across the two transports", got)
 	}
 	if got := api.debits(walletID); got != 1 {
 		t.Errorf("ledger debits = %d, want 1", got)
 	}
+	api.requireConsistent(walletID)
+}
+
+// §10 asks for the two inputs to be validated concurrently, not one after the
+// other: the message and the posts race for the same wallet row and key.
+func TestHTTPAndSQSRacingForOneOperationApplyItOnce(t *testing.T) {
+	api := startWagering(t)
+	client := testsupport.SQSClient(t, testsupport.SQSEndpoint(t))
+	playerID := uuid.NewV7().String()
+	walletID := api.openWallet(playerID, "100.00")
+
+	const posts = 10
+	replays := metrics.Duplicates.Value()
+	api.send(client, walletID, "raced", message("msg-1", "transaction-123", playerID, walletID, "BET", "25.00"))
+
+	results := make([]betResult, posts)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = api.bet(bet{
+				externalID: "transaction-123", key: "provider-a:transaction-123",
+				playerID: playerID, walletID: walletID, amount: "25.00",
+			})
+		}()
+	}
+	wg.Wait()
+	api.awaitInboundQueueDrained(client)
+
+	for _, result := range results {
+		if result.Status != http.StatusOK {
+			t.Fatalf("status = %d, want %d (%+v)", result.Status, http.StatusOK, result)
+		}
+	}
+	// Eleven arrivals, one applied: every other one must be a proven replay.
+	if got := metrics.Duplicates.Value() - replays; got != posts {
+		t.Errorf("replays = %d, want %d", got, posts)
+	}
+	if got := api.debits(walletID); got != 1 {
+		t.Errorf("ledger debits = %d, want 1", got)
+	}
+	if got := api.balance(walletID); got != "75.00" {
+		t.Errorf("balance = %s, want 75.00", got)
+	}
+	api.requireConsistent(walletID)
 }
 
 // The brief separates the two failure kinds. A message the domain refuses can never
@@ -165,14 +214,76 @@ func TestAMessageRedeliveredAfterACommitIsANoOp(t *testing.T) {
 	api.awaitBalance(walletID, "75.00")
 
 	// The commit happened; this stands in for the delete that never ran.
+	replays := metrics.Duplicates.Value()
 	api.send(client, walletID, "redelivered", body)
+	api.awaitReplayed(client, replays)
 
-	time.Sleep(3 * time.Second)
 	if got := api.balance(walletID); got != "75.00" {
 		t.Errorf("balance = %s, want the redelivery to have changed nothing", got)
 	}
 	if got := api.debits(walletID); got != 1 {
 		t.Errorf("ledger debits = %d, want 1", got)
+	}
+	api.requireConsistent(walletID)
+}
+
+// awaitReplayed proves the repeat was received and deduplicated by the
+// application (§13): the replay counter moves by exactly one, then the message
+// leaves the queue, which the consumer does only after handling it. Waiting on
+// the balance instead would pass with a dead consumer.
+func (w *wagering) awaitReplayed(client *awssqs.Client, before int64) {
+	w.t.Helper()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for metrics.Duplicates.Value() == before {
+		if time.Now().After(deadline) {
+			w.t.Fatal("the repeat was never received and replayed after 30s")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if got := metrics.Duplicates.Value() - before; got != 1 {
+		w.t.Errorf("replays = %d, want 1", got)
+	}
+	w.awaitInboundQueueDrained(client)
+}
+
+// awaitInboundQueueDrained waits for no message to be visible or in flight.
+// A visible depth of zero alone also holds while the consumer still has it.
+func (w *wagering) awaitInboundQueueDrained(client *awssqs.Client) {
+	w.t.Helper()
+
+	inbound := testsupport.InboundQueue(w.t)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		out, err := client.GetQueueAttributes(context.Background(), &awssqs.GetQueueAttributesInput{
+			QueueUrl: &inbound,
+			AttributeNames: []types.QueueAttributeName{
+				types.QueueAttributeNameApproximateNumberOfMessages,
+				types.QueueAttributeNameApproximateNumberOfMessagesNotVisible,
+			},
+		})
+		if err != nil {
+			w.t.Fatalf("read the queue depth: %v", err)
+		}
+		visible := out.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)]
+		inFlight := out.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessagesNotVisible)]
+		if visible == "0" && inFlight == "0" {
+			return
+		}
+		if time.Now().After(deadline) {
+			w.t.Fatalf("queue after 30s: %s visible, %s in flight, want it drained", visible, inFlight)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// requireConsistent is the closing check §13 asks of every scenario: the stored
+// balance equals the ledger's credits minus its debits.
+func (w *wagering) requireConsistent(walletID string) {
+	w.t.Helper()
+
+	if report := w.reconcile(walletID); !report.Consistent {
+		w.t.Errorf("reconciliation = %+v, want the stored balance to match the ledger", report)
 	}
 }
 
