@@ -484,6 +484,12 @@ aqui pelo motivo errado. Isso decorre da escolha de emulador (A.2), não do enun
 
 ## 10. Contratos HTTP
 
+A superfície inteira está especificada em [`api/openapi.yaml`](api/openapi.yaml) (OpenAPI 3.1) —
+rotas, esquemas, escopo por rota e status por classe de erro. É escrita à mão e não gerada dos
+handlers: nada checa uma contra a outra, então a especificação é mais um documento a manter, e não
+uma verificação. A alternativa, anotar os handlers e gerar, custaria comentários de geração em cada
+handler e uma dependência de ferramenta para o que hoje é um arquivo.
+
 Respostas não-2xx são `application/problem+json` (RFC 9457) com `type`, `title`, `status`, `code`,
 `detail` e os membros de extensão `instance`, `idempotentReplay` e `errors`. A validação acumula
 todas as violações em `errors[]`, para que o cliente conserte o pedido numa ida só — isso é escolha,

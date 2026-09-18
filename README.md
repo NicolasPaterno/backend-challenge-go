@@ -6,7 +6,8 @@ pelo mesmo caso de uso — com idempotência persistente, coordenação por cart
 transacional e recuperação de falhas demonstrada com três processos reais.
 
 Este arquivo é o guia de reprodução: pré-requisitos, variáveis, filas, migrations, execução,
-exemplos de chamada e comandos de teste. O enunciado original está preservado em
+exemplos de chamada e comandos de teste. O contrato HTTP completo está em
+[`api/openapi.yaml`](api/openapi.yaml). O enunciado original está preservado em
 [`DESAFIO.md`](DESAFIO.md); as decisões técnicas e seus trade-offs, em
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -20,6 +21,7 @@ exemplos de chamada e comandos de teste. O enunciado original está preservado e
 - [Migrations](#migrations)
 - [Autenticação e identidades de teste](#autenticação-e-identidades-de-teste)
 - [Exemplos de chamadas](#exemplos-de-chamadas)
+- [Especificação OpenAPI](#especificação-openapi)
 - [Testes](#testes)
 - [Observabilidade](#observabilidade)
 - [Estrutura do projeto](#estrutura-do-projeto)
@@ -325,6 +327,26 @@ registro de inbox é escrito no mesmo commit da mudança de domínio, e a mensag
 depois desse commit. O que acontece em reentrega, conflito de hash, rejeição de negócio e falha
 transitória está em [`ARCHITECTURE.md`](ARCHITECTURE.md), em "Inbox e outbox" e "Contratos das filas".
 
+## Especificação OpenAPI
+
+[`api/openapi.yaml`](api/openapi.yaml) descreve a superfície HTTP inteira em OpenAPI 3.1: as sete
+rotas de negócio, os health checks e o `/metrics`, os esquemas de `Money`, carteira, lançamento,
+transação e do corpo de erro RFC 9457, e o status esperado de cada classe de erro. O escopo exigido
+por rota e o fluxo `client_credentials` do Keycloak estão no `securitySchemes`, então um cliente
+gerado do arquivo já pede o token no lugar certo.
+
+O arquivo é escrito à mão, não gerado dos handlers — nada valida um contra o outro, então uma rota
+nova precisa de edição aqui também. Para ler ou exercitar, sem instalar nada:
+
+```sh
+docker run --rm -p 8082:8080 -e SWAGGER_JSON=/spec/openapi.yaml \
+  -v "$PWD/api:/spec" swaggerapi/swagger-ui
+# -> http://localhost:8082
+```
+
+`npx @redocly/cli lint api/openapi.yaml` valida a especificação, e
+`npx @redocly/cli preview-docs api/openapi.yaml` serve a mesma documentação em Redoc.
+
 ## Testes
 
 Só precisam de Go:
@@ -412,6 +434,7 @@ internal/platform  config, logging, httpserver, postgres, health, auth, correlat
 keycloak           realm importado pelo Compose: clients, escopos e identidades de teste
 localstack         provisionamento das filas, executado no boot do LocalStack
 migrations         SQL versionado, embarcado com //go:embed
+api                a especificação OpenAPI da superfície HTTP
 test/system        a suíte multi-instância
 ```
 
@@ -419,3 +442,4 @@ test/system        a suíte multi-instância
 | --- | --- |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | As decisões e o que cada uma custa: dinheiro, transações, idempotência, locks, referências pendentes, reversões, inbox/outbox, autenticação, autorização, Fx, shutdown — com as interpretações adotadas e as limitações |
 | [`DESAFIO.md`](DESAFIO.md) | O enunciado original, preservado sem edição |
+| [`api/openapi.yaml`](api/openapi.yaml) | O contrato HTTP em OpenAPI 3.1: rotas, esquemas, escopos e status por classe de erro |
