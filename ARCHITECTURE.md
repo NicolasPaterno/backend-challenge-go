@@ -77,6 +77,14 @@ string.
 reconstruído e pode ser negativa. Saldo de carteira negativo continua impossível: isso é
 regra do agregado e `CHECK` do schema.
 
+**Nenhum float em etapa alguma**, que é exigência eliminatória: o valor nasce `int64` no
+`Parse`, atravessa soma, subtração, comparação, JSON e coluna como `int64`, e a proibição é
+verificada por `TestInternalContainsNoFloat`, que caminha a AST de todo `.go` sob `internal/` e
+falha diante de um `float32`, `float64`, `complex64` ou `complex128` — roda no `go test ./...`
+comum, sem tag e sem container (A.3.4). O limite da representação é o do próprio `int64`:
+±9.223.372.036.854.775.807 unidades mínimas, ou cerca de 92 quatrilhões na escala de duas casas.
+`Parse`, `Add`, `Sub` e `Neg` checam o estouro e devolvem erro em vez de circular.
+
 **Persistência.** Toda coluna monetária é `BIGINT` de unidades mínimas ao lado de uma coluna de
 moeda `TEXT` sob `CHECK (currency ~ '^[A-Z]{3}$')` — o mesmo `int64` do domínio, sem conversão
 decimal no driver para dar errado. O `CHECK` é só de formato; a pertinência ao registro de moedas é
@@ -599,12 +607,18 @@ onde deve cair: no corpo, no log e na métrica.
 | Integração | `go test -race -tags=integration./...` | Postgres, Keycloak e LocalStack reais: migrations, constraints, imutabilidade do ledger, atomicidade, inbox, reentrega, DLQ, outbox concorrente, recuperação, composição Fx com start e stop |
 | Multi-instância | `go test -race -tags 'integration,system'./test/system/...` | **três processos independentes** contra containers compartilhados |
 
+A suíte de integração cobre ainda **a mesma operação pelos dois transportes**: uma `BET` por HTTP
+e a mesma operação por SQS, com o valor escrito de outra forma, deixam um único débito
+(`TestTheSameOperationOverHTTPAndSQSAppliesOnce`) — é o digest da seção 4 observado de fora.
+
 A suíte de sistema compila o binário com o detector de corrida e sobe três processos, cada um com
 suas conexões e memória. Ela cobre: a mesma aposta cinquenta vezes com o valor escrito de três
 formas, provando que a normalização chega ao hash nos dois transportes; as duas apostas de 80.00
 contra 100.00, com reenvio; uma carteira travada que não bloqueia outra — a sobreposição é
 observada, não presumida; um consumidor morto com `SIGKILL` e todas as mensagens reenviadas; uma
-referência pendente retomada por uma instância sobrevivente; três publishers drenando uma outbox com
+referência pendente retomada por uma instância sobrevivente, onde a aposta reenviada depois da
+queda volta como replay com o saldo do processamento original — a idempotência persistente
+sobrevivendo à morte do processo que a gravou; três publishers drenando uma outbox com
 um deles morrendo. Todo cenário termina reconciliando todas as carteiras que tocou.
 
 ## 14. Interpretações adotadas

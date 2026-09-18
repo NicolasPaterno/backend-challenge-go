@@ -352,7 +352,7 @@ docker run --rm -p 8082:8080 -e SWAGGER_JSON=/spec/openapi.yaml \
 Só precisam de Go:
 
 ```sh
-go test ./...        # 182 testes de unidade, sem containers
+go test ./...        # os testes de unidade, sem containers
 go test -race ./...  # os mesmos, sob o detector de race
 go vet ./...
 gofmt -l .           # não imprime nada quando a formatação está limpa
@@ -380,7 +380,9 @@ go test -race -tags=integration -timeout 20m ./...
 Cobre migrations `up` e `down`, constraints e imutabilidade do ledger, atomicidade financeira,
 inbox e reentrega, outbox concorrente, retry, DLQ, a integração real com o IdP (token ausente,
 inválido, expirado, audiência errada, isolamento entre provedores) e a composição do Fx com seu
-start e stop.
+start e stop. Cobre também **a mesma operação entregue pelos dois transportes** — uma `BET` por
+HTTP e a mesma por SQS, com o valor escrito de outra forma — provando um único débito
+(`TestTheSameOperationOverHTTPAndSQSAppliesOnce`).
 
 ### Múltiplas instâncias e simulações de falha (build tags `integration,system`)
 
@@ -400,7 +402,7 @@ O que está demonstrado ali:
 | Duas apostas de 80.00 contra saldo de 100.00 | uma processada, uma rejeitada por saldo insuficiente, saldo final 20.00, um único débito — e reenvios não mudam isso |
 | Carteiras distintas | avançam em paralelo mesmo com uma delas travada |
 | Consumidor morto com `SIGKILL` | a mensagem é reentregue e tratada por outra instância |
-| Reversão em `PENDING_REFERENCE` cuja instância morre | outra instância assume a espera |
+| Reversão em `PENDING_REFERENCE` cuja instância morre | outra instância assume a espera, e a aposta reenviada depois da queda é replay com o saldo original |
 | Três publishers sobre um mesmo outbox | publicação recuperada, `eventId` preservado |
 
 Todo cenário termina reconciliando contra o ledger cada carteira que tocou.
