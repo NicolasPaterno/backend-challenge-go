@@ -5,113 +5,453 @@ Serviço em Go, composto com Uber Fx, que processa operações financeiras de pr
 pelo mesmo caso de uso — com idempotência persistente, coordenação por carteira, outbox
 transacional e recuperação de falhas demonstrada com três processos reais.
 
-Este arquivo é o guia de reprodução: pré-requisitos, variáveis, filas, migrations, execução,
-exemplos de chamada e comandos de teste. O contrato HTTP completo está em
-[`api/openapi.yaml`](api/openapi.yaml). O enunciado original está preservado em
-[`DESAFIO.md`](DESAFIO.md); as decisões técnicas e seus trade-offs, em
-[`ARCHITECTURE.md`](ARCHITECTURE.md).
+| Documento | Conteúdo |
+| --- | --- |
+| este `README.md` | como subir, autenticar, exercitar e testar |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | as decisões, os trade-offs, as interpretações adotadas e as limitações |
+| [`api/openapi.yaml`](api/openapi.yaml) | o contrato HTTP em OpenAPI 3.1 |
+| [`DESAFIO.md`](DESAFIO.md) | o enunciado original, sem edição |
 
 ## Sumário
 
-- [Pré-requisitos](#pré-requisitos)
-- [Subindo tudo com Docker Compose](#subindo-tudo-com-docker-compose)
-- [Rodando a aplicação fora do Docker](#rodando-a-aplicação-fora-do-docker)
-- [Variáveis de ambiente](#variáveis-de-ambiente)
-- [Filas SQS](#filas-sqs)
-- [Migrations](#migrations)
-- [Autenticação e identidades de teste](#autenticação-e-identidades-de-teste)
-- [Exemplos de chamadas](#exemplos-de-chamadas)
-- [Especificação OpenAPI](#especificação-openapi)
-- [Testes](#testes)
-- [Observabilidade](#observabilidade)
-- [Estrutura do projeto](#estrutura-do-projeto)
+1. [Pré-requisitos](#1-pré-requisitos)
+2. [Subir o ambiente](#2-subir-o-ambiente)
+3. [Autenticar](#3-autenticar)
+4. [Roteiro: o fluxo completo pela linha de comando](#4-roteiro-o-fluxo-completo-pela-linha-de-comando)
+5. [Swagger UI](#5-swagger-ui)
+6. [Três instâncias ao mesmo tempo](#6-três-instâncias-ao-mesmo-tempo)
+7. [Testes](#7-testes)
+8. [Testes obrigatórios e critérios desclassificatórios](#8-testes-obrigatórios-e-critérios-desclassificatórios)
+9. [Referência](#9-referência) — variáveis, filas, migrations, códigos HTTP, observabilidade, rodar fora do Docker, estrutura
 
-## Pré-requisitos
+## 1. Pré-requisitos
 
 - Docker com Compose v2 (`docker compose version`)
-- Go 1.27 — só para rodar os testes e as ferramentas fora dos containers
+- `curl`, `jq` e `uuidgen` — só para o roteiro da seção 4
+- Go 1.27 — só para os testes e para rodar a API fora do Docker
 
-Nenhuma CLI extra é necessária: as migrations são embarcadas no binário `migrate` com
-`//go:embed`, e as filas são criadas pelo próprio LocalStack no boot.
+Nenhuma outra CLI: as migrations estão embarcadas no binário e as filas são criadas pelo próprio
+LocalStack no boot.
 
-## Subindo tudo com Docker Compose
+## 2. Subir o ambiente
 
 ```sh
 cp .env.example .env
-docker compose up --build
+docker compose up --build -d
+docker compose ps
 ```
 
-Compose sobe, nesta ordem e por healthcheck: **PostgreSQL**, **Keycloak** (que importa
-`keycloak/realm.json` com o realm, os clients e as identidades de teste) e **LocalStack** (que
-executa `localstack/init-queues.sh`, criando as três filas FIFO com redrive e políticas de
-acesso). Em seguida o serviço `migrate` aplica as migrations e sai; só então a API sobe. Nenhum
-passo manual.
+O Compose sobe, esperando o healthcheck de cada um: **PostgreSQL**, **Keycloak** (importa
+`keycloak/realm.json`: realm, clients e identidades de teste), **LocalStack** (roda
+`localstack/init-queues.sh`: filas FIFO, redrive e políticas de acesso), o **migrate** (aplica as
+migrations e sai) e por fim a **API**. Nenhum passo manual.
 
 | Serviço | Endereço no host |
 | --- | --- |
 | API | `http://localhost:8080` |
-| Keycloak | `http://localhost:8081` (admin `admin`/`admin`) |
+| Keycloak | `http://localhost:8081` (console admin: `admin` / `admin`) |
 | LocalStack | `http://localhost:4566` |
-| PostgreSQL | `localhost:5432` (`wagering`/`wagering`) |
+| PostgreSQL | `localhost:5432` (`wagering` / `wagering`) |
+
+Pronto quando isto responde `200`:
 
 ```sh
-curl -s http://localhost:8080/health/live    # processo de pé, sem tocar dependências
-curl -s http://localhost:8080/health/ready   # 200 só se Postgres e a fila de entrada respondem
-curl -s http://localhost:8080/metrics        # os contadores, como JSON do expvar
+curl -s -w '  HTTP %{http_code}\n' http://localhost:8080/health/ready
 ```
 
-Derrubar tudo, inclusive o volume do banco:
+Logs: `docker compose logs -f api`. Derrubar tudo, inclusive o banco: `docker compose down -v`.
+
+## 3. Autenticar
+
+Toda rota de carteira e de operação exige um access token OIDC emitido pelo Keycloak; health
+checks e `/metrics` são públicos. O realm `wagering` vem com estas identidades
+`client_credentials` — segredos locais, sempre `<client_id>-secret`:
+
+| `client_id` | `client_secret` | Escopo | Pode |
+| --- | --- | --- | --- |
+| `internal-service` | `internal-service-secret` | `wallets` | abrir carteira, ler carteira e ledger, reconciliar |
+| `provider-a` | `provider-a-secret` | `wagering` | submeter e consultar **só** operações com `providerId: provider-a` |
+| `provider-b` | `provider-b-secret` | `wagering` | o mesmo, para `provider-b` |
+| `provider-expiring` | `provider-expiring-secret` | `wagering` | token de 1 segundo — existe para o teste de expiração |
+| `outsider` | `outsider-secret` | nenhum | nada; token de outra audiência — existe para o teste de audiência |
+
+O `providerId` autorizado vem da claim `provider_id` do token, nunca do corpo. Um token de
+provedor numa rota de carteira recebe `403`, e o interno numa rota de operação também. Token
+ausente, malformado, expirado ou de outra audiência recebe `401`.
+
+Pedir os tokens no shell — **eles vencem em 5 minutos**; se uma chamada começar a responder
+`401`, rode `login` de novo:
 
 ```sh
-docker compose down -v
+token() {
+  curl -s http://localhost:8081/realms/wagering/protocol/openid-connect/token \
+    -d grant_type=client_credentials -d client_id="$1" -d client_secret="$1-secret" \
+  | jq -r .access_token
+}
+login() {
+  INTERNAL=$(token internal-service)
+  PROVIDER=$(token provider-a)
+  PROVIDER_B=$(token provider-b)
+}
+login
 ```
 
-### Múltiplas instâncias
+## 4. Roteiro: o fluxo completo pela linha de comando
 
-O serviço `api` publica uma **faixa** de portas em vez de uma só, então as réplicas sobem lado a
-lado sem conflito:
+Cole os blocos em ordem, no mesmo terminal onde rodou a seção 3 — cada um usa as variáveis e
+funções do anterior. Os resultados esperados estão no texto, fora dos blocos, para que tudo o que
+está dentro de um bloco possa ser colado inteiro.
+
+### 4.1. Funções auxiliares
+
+`open_wallet` abre uma carteira para um jogador novo e guarda `PLAYER` e `WALLET`. `submit` envia
+uma operação de `provider-a` para essa carteira e imprime o corpo e o status HTTP. `RUN` prefixa os
+ids externos, porque `(providerId, externalTransactionId)` é único para sempre — sem ele, repetir o
+roteiro seria um replay do anterior.
 
 ```sh
-docker compose up --build --scale api=3
-curl -s http://localhost:8080/health/ready
-curl -s http://localhost:8082/health/ready
+API=http://localhost:8080
+RUN=$(date +%s)
+
+open_wallet() {
+  PLAYER=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  WALLET=$(curl -s -X POST $API/wallets \
+    -H "Authorization: Bearer $INTERNAL" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg player "$PLAYER" --arg amount "$1" \
+          '{playerId: $player, initialBalance: {amount: $amount, currency: "BRL"}}')" \
+    | tee /dev/stderr | jq -r .id)
+  echo "WALLET=$WALLET"
+}
+
+submit() {
+  curl -s -w '  HTTP %{http_code}\n' -X POST ${API}/wagering/transactions \
+    -H "Authorization: Bearer $PROVIDER" -H 'Content-Type: application/json' \
+    -H "Idempotency-Key: provider-a:$RUN-$2" \
+    -d "$(jq -n --arg kind "$1" --arg id "$RUN-$2" --arg amount "$3" --arg ref "${4:+$RUN-$4}" \
+          --arg player "$PLAYER" --arg wallet "$WALLET" '{
+      providerId: "provider-a", externalTransactionId: $id,
+      playerId: $player, walletId: $wallet, roundId: "round-987", gameId: "fortune-chimp",
+      kind: $kind, money: {amount: $amount, currency: "BRL"}
+    } + (if $ref == "" then {} else {referenceExternalTransactionId: $ref} end)')"
+}
 ```
 
-As réplicas disputam as mesmas carteiras, a mesma fila e o mesmo outbox; nenhuma depende de
-estado em memória. A porta `8081` da faixa coincide com a do Keycloak — se ele já estiver
-publicado no host, mude a faixa antes de escalar, ou use a suíte de sistema descrita em
-[Testes](#testes), que sobe os três processos por conta própria.
+Uso: `submit KIND ID_EXTERNO VALOR [ID_EXTERNO_DA_REFERÊNCIA]`.
 
-## Rodando a aplicação fora do Docker
-
-Suba só a infraestrutura:
+### 4.2. Abrir e ler uma carteira
 
 ```sh
-docker compose up postgres keycloak localstack
+open_wallet 1000.00
+curl -s $API/wallets/$WALLET -H "Authorization: Bearer $INTERNAL" | jq
 ```
 
-Rode a API no host, trocando os nomes de serviço do Compose pelos endereços publicados:
+A abertura responde `{"id":"…","playerId":"…","balance":{"amount":"1000.00","currency":"BRL"},"version":1}`.
+No mesmo commit ficam a carteira, uma transação `OPENING` `PROCESSED`, o lançamento de crédito e
+os eventos de outbox. Abrir uma segunda carteira para o mesmo jogador e moeda responde `409`.
+
+### 4.3. Apostas, idempotência e rejeição
 
 ```sh
-export $(grep -v '^#' .env.example | xargs)
-export DATABASE_URL='postgres://wagering:wagering@localhost:5432/wagering?sslmode=disable'
-export SQS_ENDPOINT=http://localhost:4566
-export OIDC_DISCOVERY_URL=http://localhost:8081/realms/wagering
-export SQS_WAGER_TRANSACTIONS_QUEUE_URL=http://localhost:4566/000000000000/wager-transactions.fifo
-export SQS_WAGER_TRANSACTIONS_DLQ_URL=http://localhost:4566/000000000000/wager-transactions-dlq.fifo
-export SQS_EVENTS_QUEUE_URL=http://localhost:4566/000000000000/wager-events.fifo
-
-make migrate-up
-make run
+submit BET bet-1 25.00
+submit BET bet-1 25.00
+submit BET bet-1 30.00
+submit BET bet-2 5000.00
 ```
 
-`OIDC_ISSUER_URL` não muda: `KC_HOSTNAME` fixa o issuer, então o token é o mesmo nos dois modos.
+1. `200`, `PROCESSED`, saldo `975.00`, `idempotentReplay: false`.
+2. `200`, o **mesmo** resultado com `idempotentReplay: true` — nada debitado de novo.
+3. `409`: a mesma `Idempotency-Key` com outro conteúdo.
+4. `422` com `code: INSUFFICIENT_FUNDS` — rejeição de negócio, registrada e auditável.
 
-## Variáveis de ambiente
+### 4.4. `WIN` e `LOSS`
+
+```sh
+submit WIN win-1 50.00 bet-1
+submit LOSS loss-1 0.00
+```
+
+`WIN` credita (saldo `1025.00`); a referência é opcional e só registrada. `LOSS` exige valor zero,
+fecha como `PROCESSED` e não move dinheiro: nenhum lançamento, nenhuma mudança de versão.
+
+### 4.5. Uma reversão que chega antes da referência
+
+```sh
+submit REFUND refund-3 10.00 bet-3
+submit BET bet-3 10.00
+```
+
+O `REFUND` responde `202` com `PENDING_REFERENCE`: a aposta `bet-3` ainda não existe. A aposta
+então chega e debita (`1015.00`). O worker de referências varre a espera em alguns segundos e
+aplica o reembolso:
+
+```sh
+curl -s $API/providers/provider-a/wagering/transactions/$RUN-refund-3 \
+  -H "Authorization: Bearer $PROVIDER" | jq '{status, failureCode, balance}'
+```
+
+Repita até ver `"status": "PROCESSED"` com saldo `1025.00`. Uma referência que nunca chega vira
+`REJECTED` com `REFERENCE_NOT_FOUND` quando vence `REFERENCE_TTL`.
+
+### 4.6. A mesma operação por SQS
+
+O consumidor lê `wager-transactions.fifo` e entrega a mensagem ao mesmo caso de uso do HTTP:
+
+```sh
+MSG=$(jq -n --arg run "$RUN" --arg player "$PLAYER" --arg wallet "$WALLET" '{
+  messageId: "\($run)-msg-1", type: "WagerTransactionRequested",
+  occurredAt: "2026-09-08T12:00:00.000Z",
+  data: {
+    providerId: "provider-a", externalTransactionId: "\($run)-sqs-1",
+    idempotencyKey: "provider-a:\($run)-sqs-1",
+    playerId: $player, walletId: $wallet, roundId: "round-987", gameId: "fortune-chimp",
+    kind: "BET", money: {amount: "25.00", currency: "BRL"}
+  }}')
+echo "$MSG" | jq
+
+docker compose exec localstack awslocal sqs send-message \
+  --queue-url http://localhost:4566/000000000000/wager-transactions.fifo \
+  --message-group-id "$WALLET" --message-deduplication-id "$RUN-msg-1" \
+  --message-body "$MSG"
+```
+
+Um ou dois segundos depois a operação está processada (saldo `1000.00`):
+
+```sh
+curl -s $API/providers/provider-a/wagering/transactions/$RUN-sqs-1 \
+  -H "Authorization: Bearer $PROVIDER" | jq '{status, balance}'
+```
+
+O registro de inbox é gravado no mesmo commit da mudança de domínio, e a mensagem só sai da fila
+depois desse commit. Mandar pela fila uma operação que já chegou por HTTP é um replay, não um
+segundo débito — `TestTheSameOperationOverHTTPAndSQSAppliesOnce` prova isso.
+
+### 4.7. Consultas, ledger paginado e isolamento entre provedores
+
+```sh
+TX=$(curl -s $API/providers/provider-a/wagering/transactions/$RUN-bet-1 \
+  -H "Authorization: Bearer $PROVIDER" | jq -r .transactionId)
+curl -s $API/wagering/transactions/$TX -H "Authorization: Bearer $PROVIDER" | jq
+
+curl -s -w '  HTTP %{http_code}\n' $API/wagering/transactions/$TX -H "Authorization: Bearer $PROVIDER_B"
+curl -s -w '  HTTP %{http_code}\n' $API/wallets/$WALLET -H "Authorization: Bearer $PROVIDER"
+```
+
+`provider-b` não enxerga a transação de `provider-a`, e um provedor não lê carteiras — nenhum
+corpo de erro carrega dado financeiro.
+
+```sh
+PAGE=$(curl -s "$API/wallets/$WALLET/ledger?limit=4" -H "Authorization: Bearer $INTERNAL")
+echo "$PAGE" | jq '.entries[] | {direction, money, balanceAfter}'
+CURSOR=$(echo "$PAGE" | jq -r .nextCursor)
+curl -s "$API/wallets/$WALLET/ledger?limit=4&cursor=$CURSOR" -H "Authorization: Bearer $INTERNAL" | jq
+```
+
+O ledger pagina por cursor opaco em ordem estável: 4 lançamentos na primeira página, 2 na segunda, que já não traz `nextCursor`. Uma página cheia sempre traz o cursor, mesmo que a seguinte venha vazia.
+
+### 4.8. Reconciliação
+
+```sh
+curl -s -X POST $API/wallets/$WALLET/reconciliation -H "Authorization: Bearer $INTERNAL" | jq
+```
+
+Depois do roteiro: `storedBalance` e `calculatedBalance` iguais a `1000.00`, `difference`
+`0.00`, `consistent: true` e `checkedEntries: 6` (abertura, `bet-1`, `win-1`, `bet-3`,
+`refund-3`, `sqs-1`). Uma única consulta lê o saldo armazenado ao lado do reconstruído do ledger;
+nada é alterado, e uma divergência real vai para o corpo, para o log e para a métrica
+`reconciliation_divergences`.
+
+## 5. Swagger UI
+
+```sh
+docker run --rm --name api-docs -p 8088:8080 \
+  -e SWAGGER_JSON=/spec/openapi.yaml -v "$PWD/api:/spec" \
+  swaggerapi/swagger-ui
+```
+
+Abra `http://localhost:8088` com o ambiente da seção 2 de pé. Para autenticar:
+
+1. Clique em **Authorize**.
+2. Em `client_id` e `client_secret`, use uma identidade da [seção 3](#3-autenticar) — por exemplo
+   `internal-service` / `internal-service-secret`.
+3. Marque **só** o escopo dessa identidade (`wallets` para o interno, `wagering` para um
+   provedor) e clique em **Authorize**. O Swagger pede o token ao Keycloak e o envia em toda
+   chamada de **Try it out**.
+4. Para trocar de identidade — abrir a carteira como interno e apostar como `provider-a`, por
+   exemplo — clique em **Logout** e repita.
+
+A porta precisa ser `8088`: é a única origem que o Keycloak aceita para o Swagger pedir token do
+navegador. `npx @redocly/cli lint api/openapi.yaml` valida a especificação. Ela é escrita à mão,
+não gerada dos handlers, então uma rota nova precisa de edição lá também.
+
+## 6. Três instâncias ao mesmo tempo
+
+```sh
+API_PORTS=8082-8084 docker compose up --build -d --scale api=3
+docker compose ps api
+```
+
+Sozinha, a API fica na `8080`. Escalada, cada réplica pega uma porta da faixa `8082-8084` (a
+`8081` é do Keycloak) — as três estão em uso, em qualquer ordem. Todas disputam as mesmas
+carteiras, a mesma fila e o mesmo outbox, sem estado em memória.
+
+O teste obrigatório das duas apostas de 80.00 contra 100.00, à mão, em duas instâncias diferentes
+ao mesmo tempo (com as funções da seção 4.1 carregadas):
+
+```sh
+login
+API=http://localhost:8082
+open_wallet 100.00
+API=http://localhost:8083 submit BET race-a 80.00 &
+API=http://localhost:8084 submit BET race-b 80.00 &
+wait
+curl -s -X POST $API/wallets/$WALLET/reconciliation -H "Authorization: Bearer $INTERNAL" | jq
+```
+
+Uma aposta `200`, a outra `422 INSUFFICIENT_FUNDS`; na reconciliação, saldo `20.00`,
+`consistent: true` e `checkedEntries: 2` (a abertura e um único débito).
+
+Voltar a uma instância: `docker compose up -d --scale api=1` e `API=http://localhost:8080`. A
+versão automatizada e mais rigorosa disto — com `SIGKILL`, tomada de trabalho e três
+publishers — é a suíte de sistema da [seção 7](#73-múltiplas-instâncias-e-simulações-de-falha).
+
+## 7. Testes
+
+### 7.1. Unidade — só Go
+
+```sh
+go test ./...
+go test -race ./...
+go vet ./...
+gofmt -l .
+```
+
+`gofmt -l .` não imprime nada quando a formatação está limpa.
+
+### 7.2. Integração — build tag `integration`
+
+Os testes sobem **containers reais** de PostgreSQL, Keycloak e LocalStack por conta própria, via
+testcontainers. Não usam o ambiente do Compose e nunca usam mocks; basta o Docker rodando. Para
+não gastar o timeout do teste baixando imagens:
+
+```sh
+docker pull postgres:17-alpine
+docker pull quay.io/keycloak/keycloak:26.4
+docker pull localstack/localstack:4
+```
+
+```sh
+go test -race -tags=integration -timeout 20m ./...
+```
+
+Cobrem migrations `up` e `down`, constraints e imutabilidade do ledger, atomicidade financeira,
+inbox e reentrega, outbox concorrente, retry, DLQ, a integração real com o IdP e a composição do
+Fx com start e stop.
+
+### 7.3. Múltiplas instâncias e simulações de falha — build tags `integration,system`
+
+`test/system` compila a API com o detector de race e roda **três processos independentes**,
+cada um com suas conexões e sua memória, contra containers compartilhados:
+
+```sh
+go test -race -tags 'integration,system' -timeout 40m ./test/system/...
+```
+
+Todo cenário termina reconciliando contra o ledger cada carteira que tocou.
+
+### 7.4. Um teste só
+
+```sh
+go test -race -tags=integration -run '^TestTwoBetsRaceForOneBalance$' -v ./cmd/api
+```
+
+O `Makefile` embrulha os comandos: `test`, `test-race`, `test-integration`, `test-system`, `vet`,
+`fmt`, além de `run`, `build`, `migrate-up` e `migrate-down`.
+
+## 8. Testes obrigatórios e critérios desclassificatórios
+
+Onde está a prova de cada exigência de teste do enunciado (§13) e de cada critério
+desclassificatório (§14). Coluna **Tags**: `—` roda em `go test ./...`; `integration` e `system`
+são as build tags das seções 7.2 e 7.3. Os testes sem pacote indicado estão em `./cmd/api`.
+
+### 8.1. Concorrência e recuperação (§13, itens 1 a 8)
+
+| # | Exigência | Teste | Tags |
+| --- | --- | --- | --- |
+| 1 | A mesma aposta 50 vezes em paralelo, um único débito | `TestSameBetInParallelDebitsOnce` | integration |
+|   | … entre três processos | `TestTheSameBetFiftyTimesAcrossInstancesDebitsOnce` | system |
+| 2 | Duas apostas de 80.00 contra 100.00: uma processada, uma `INSUFFICIENT_FUNDS`, saldo 20.00, um débito, reenvios não mudam nada | `TestTwoBetsRaceForOneBalance` | integration |
+|   | … entre três processos | `TestTwoBetsOfEightyRaceForOneHundredAcrossInstances` | system |
+| 3 | Carteiras distintas em paralelo | `TestDistinctWalletsProceedInParallel` | integration |
+|   | … uma carteira travada não bloqueia outra, entre processos | `TestAHeldWalletDoesNotBlockAnother` | system |
+| 4 | Os cenários relevantes com três instâncias independentes | toda a suíte `./test/system` | system |
+| 5 | Consumidor interrompido depois do commit e antes de remover a mensagem; reentrega validada | `TestAMessageRedeliveredAfterACommitIsANoOp` | integration |
+|   | … processo morto com `SIGKILL` | `TestAKilledConsumerLosesNoMessageAndDuplicatesNoDebit` | system |
+| 6 | Dois publishers disputando o outbox; recuperação da publicação | `TestTwoPublishersNeverClaimTheSameRow`, `TestARowLostBetweenSendAndConfirmationIsRepublishedUnchanged` (`./internal/adapter/postgres`) | integration |
+|   | … três publishers, `eventId` preservado | `TestThreePublishersPublishEveryEventOnce` | system |
+| 7 | `REFUND`/`ROLLBACK` antes da referência: resolução posterior, ou rejeição por expiração | `TestAReversalDeliveredBeforeItsReferenceResolvesLater`, `TestAWaitExpiresIntoAReferenceNotFoundRejection` | integration |
+| 8 | Reinício preserva idempotência, trabalho pendente e consistência; outra instância assume | `TestAWaitSurvivesARestartAndIsResumedByAnotherInstance` | integration |
+|   | … a instância morre, outra assume, e a aposta reenviada é replay com o saldo original | `TestAPendingReferenceIsTakenOverByAnotherInstance` | system |
+| — | A mesma operação por HTTP e por SQS, um único débito | `TestTheSameOperationOverHTTPAndSQSAppliesOnce` | integration |
+
+### 8.2. Autenticação e autorização (§13)
+
+| Exigência | Teste | Tags |
+| --- | --- | --- |
+| Integração real com o IdP; recusa de token ausente, inválido, expirado, de outra audiência | `TestVerifyRefusesTokensThisAPIMustNotAccept` (`./internal/platform/auth`), `TestGuardRefusesUnusableCredentials` (`./internal/adapter/httpapi`) | integration / — |
+| Isolamento entre provedores, inclusive em consultas e replays | `TestProvidersAreIsolated` | integration |
+| Operações internas restritas ao serviço interno | `TestWalletRoutesAcceptOnlyTheInternalService` | integration |
+| Nenhum efeito financeiro nem exposição de dados sem autorização | `TestUnauthorizedReadExposesNoWalletData` | integration |
+
+### 8.3. Critérios desclassificatórios (§14)
+
+| Desclassifica se… | O que prova que não acontece | Tags |
+| --- | --- | --- |
+| endpoints de negócio sem autenticação efetiva | `TestWalletRoutesAcceptOnlyTheInternalService`, `TestVerifyRefusesTokensThisAPIMustNotAccept` | integration |
+| acesso não autorizado a operações ou transações | `TestProvidersAreIsolated`, `TestUnauthorizedReadExposesNoWalletData` | integration |
+| cálculo monetário em ponto flutuante | `TestInternalContainsNoFloat` (`./internal/domain`) — varre todo `internal/` com `go/ast` | — |
+| saldo negativo por concorrência | `TestTwoBetsRaceForOneBalance`, `TestTwoBetsOfEightyRaceForOneHundredAcrossInstances`; o `CHECK` no banco por `TestSchemaEnforcesTheFinancialInvariants` (`./internal/adapter/postgres`) | integration, system |
+| movimentação de saldo duplicada | `TestSameBetInParallelDebitsOnce`, `TestARedeliveredMessageDebitsOnce`, `TestTheSameOperationOverHTTPAndSQSAppliesOnce`, `TestTwoReversalsRacingForOneBetReturnItOnce`, `TestTheSchemaRefusesASecondSuccessfulReversal` | integration |
+| idempotência só em memória | `TestAWaitSurvivesARestartAndIsResumedByAnotherInstance`, `TestAPendingReferenceIsTakenOverByAnotherInstance` | integration, system |
+| depender de uma única instância | toda a suíte `./test/system` | system |
+| publicar antes do commit | `TestOutcomesWriteTheirEventsToTheOutbox`, `TestARowLostBetweenSendAndConfirmationIsRepublishedUnchanged` | integration |
+| ledger não auditável | `TestSchemaEnforcesTheFinancialInvariants` (`UPDATE`/`DELETE` recusados pelo banco), `TestLedgerEntryHasNoMutatingMethods` (`./internal/domain/wallet`), `TestReconciliationAgreesAfterMixedOperationsAndChangesNothing` | integration / — |
+| PostgreSQL, SQS e IdP trocados por mocks nos testes | as suítes `integration` e `system` sobem os três em containers reais | integration, system |
+
+Rodar só os desclassificatórios:
+
+```sh
+go test -race ./internal/domain/... ./internal/adapter/httpapi/...
+go test -race -tags=integration -timeout 20m -v ./cmd/api ./internal/adapter/postgres ./internal/platform/auth \
+  -run 'TestWalletRoutesAcceptOnlyTheInternalService|TestVerifyRefusesTokensThisAPIMustNotAccept|TestProvidersAreIsolated|TestUnauthorizedReadExposesNoWalletData|TestTwoBetsRaceForOneBalance|TestSchemaEnforcesTheFinancialInvariants|TestSameBetInParallelDebitsOnce|TestARedeliveredMessageDebitsOnce|TestTheSameOperationOverHTTPAndSQSAppliesOnce|TestTwoReversalsRacingForOneBetReturnItOnce|TestTheSchemaRefusesASecondSuccessfulReversal|TestAWaitSurvivesARestartAndIsResumedByAnotherInstance|TestOutcomesWriteTheirEventsToTheOutbox|TestARowLostBetweenSendAndConfirmationIsRepublishedUnchanged|TestReconciliationAgreesAfterMixedOperationsAndChangesNothing'
+go test -race -tags 'integration,system' -timeout 40m ./test/system/...
+```
+
+## 9. Referência
+
+### 9.1. Códigos HTTP
+
+A tabela completa, por classe de erro, está em [`ARCHITECTURE.md`](ARCHITECTURE.md), em
+"Contratos HTTP", e os `failureCode` em "Máquina de estados e códigos de falha". Toda resposta de
+erro é `application/problem+json` (RFC 9457).
+
+| Situação | Status |
+| --- | --- |
+| Processada, ou replay de uma processada | `200` |
+| Reversão esperando a referência | `202` |
+| Entrada inválida, `Idempotency-Key` ausente, `kind` inutilizável | `400` |
+| Token ausente, inválido, expirado ou de outra audiência | `401` |
+| Token não autoriza a rota ou o `providerId` do corpo | `403` |
+| Chave reusada com outro conteúdo, operação reenviada sob outra chave, carteira duplicada | `409` |
+| Rejeição de negócio — `code` é o `failureCode` estável | `422` |
+| Carteira disputada além do `DB_LOCK_TIMEOUT`, ou dependência indisponível | `503` + `Retry-After` |
+
+### 9.2. Variáveis de ambiente
 
 Toda configuração vem do ambiente. `.env.example` traz a lista completa com valores locais e
-nenhum segredo real; o Compose lê o `.env` automaticamente. As obrigatórias não têm default: uma
-aplicação financeira não deve assumir silenciosamente um banco, um issuer ou uma fila.
+nenhum segredo real; o Compose lê o `.env` sozinho. As obrigatórias não têm default: uma aplicação
+financeira não deve assumir em silêncio um banco, um issuer ou uma fila. Uma configuração inválida
+derruba o processo no boot, antes de montar o grafo do Fx, reportando **todos** os problemas numa
+mensagem só.
 
 | Variável | Default | Para quê |
 | --- | --- | --- |
@@ -122,12 +462,12 @@ aplicação financeira não deve assumir silenciosamente um banco, um issuer ou 
 | `DB_MAX_CONNS` / `DB_MIN_CONNS` | `10` / `1` | Limites do pool de conexões |
 | `DB_LOCK_TIMEOUT` | `3s` | Espera máxima por uma carteira disputada antes de responder `503` |
 | `SHUTDOWN_TIMEOUT` | `15s` | Orçamento do shutdown inteiro no `SIGTERM` |
-| `WORKER_DRAIN_TIMEOUT` | `5s` | Cota de cada worker dentro desse orçamento, para que nenhum gaste tudo |
+| `WORKER_DRAIN_TIMEOUT` | `5s` | Cota de cada worker dentro desse orçamento |
 | `STARTUP_TIMEOUT` | `15s` | Orçamento das checagens de dependência no boot |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Proteção contra headers lentos |
 | `OIDC_ISSUER_URL` | — **obrigatória** | Issuer como aparece nos tokens |
 | `OIDC_DISCOVERY_URL` | o issuer | Onde metadata e JWKS são buscados |
-| `OIDC_AUDIENCE` | — **obrigatória** | Audience que os tokens precisam carregar |
+| `OIDC_AUDIENCE` | — **obrigatória** | Audiência que os tokens precisam carregar |
 | `SQS_WAGER_TRANSACTIONS_QUEUE_URL` | — **obrigatória** | Fila que o consumidor lê |
 | `SQS_WAGER_TRANSACTIONS_DLQ_URL` | — **obrigatória** | DLQ das mensagens intratáveis |
 | `SQS_EVENTS_QUEUE_URL` | — **obrigatória** | Fila para onde o outbox publica |
@@ -136,18 +476,14 @@ aplicação financeira não deve assumir silenciosamente um banco, um issuer ou 
 | `OUTBOX_BATCH_SIZE` | `100` | Linhas reivindicadas por ciclo |
 | `REFERENCE_POLL_INTERVAL` | `1s` | Espera entre varreduras de referências pendentes |
 | `REFERENCE_BATCH_SIZE` | `100` | Reversões varridas por ciclo |
-| `REFERENCE_TTL` | `24h` | Quanto tempo uma reversão espera a referência antes de ser rejeitada |
+| `REFERENCE_TTL` | `24h` | Quanto uma reversão espera a referência antes de ser rejeitada |
 | `AWS_REGION` | `us-east-1` | Região que o cliente SQS assina |
 | `SQS_ENDPOINT` | vazio | Endereço do LocalStack; vazio significa SQS real |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | — | Credenciais do broker; `test`/`test` contra o LocalStack |
 
-A validação acontece de uma vez no boot: uma configuração inválida derruba o processo antes de
-montar o grafo do Fx e reporta **todos** os problemas numa mensagem só.
+### 9.3. Filas SQS
 
-## Filas SQS
-
-`localstack/init-queues.sh` roda no boot do LocalStack e provisiona três filas FIFO — nenhum
-comando manual é necessário:
+`localstack/init-queues.sh` roda no boot do LocalStack e provisiona três filas FIFO:
 
 | Fila | Papel | `MessageGroupId` | `MessageDeduplicationId` |
 | --- | --- | --- | --- |
@@ -155,277 +491,75 @@ comando manual é necessário:
 | `wager-transactions-dlq.fifo` | destino da redrive policy | o grupo original | o `messageId` |
 | `wager-events.fifo` | saída dos eventos de integração | a carteira | o `eventId` |
 
-A fila de entrada tem `VisibilityTimeout` de 30s e `maxReceiveCount` 3 apontando para a DLQ.
-Cada fila recebe uma política de acesso por principal com a ação mínima necessária. Conferir o
-que subiu:
+A fila de entrada tem `VisibilityTimeout` de 30s e `maxReceiveCount` 3 apontando para a DLQ; cada
+fila tem uma política de acesso por principal com a ação mínima necessária. Reentrega, conflito
+de hash, rejeição de negócio e falha transitória estão em [`ARCHITECTURE.md`](ARCHITECTURE.md),
+em "Inbox e outbox" e "Contratos das filas".
 
 ```sh
 docker compose exec localstack awslocal sqs list-queues
+docker compose exec localstack awslocal sqs receive-message --max-number-of-messages 10 \
+  --queue-url http://localhost:4566/000000000000/wager-events.fifo
 ```
 
-## Migrations
+O segundo comando mostra os eventos que o outbox publicou durante o roteiro.
 
-Onze migrations versionadas em `migrations/`, como `NNNN_nome.up.sql` / `.down.sql`, embarcadas
-no binário — ele não precisa dos arquivos em runtime.
+### 9.4. Migrations
 
-```sh
-export DATABASE_URL='postgres://wagering:wagering@localhost:5432/wagering?sslmode=disable'
+Onze migrations em `migrations/`, como `NNNN_nome.up.sql` / `.down.sql`, embarcadas no binário.
+No Compose o serviço `migrate` as aplica sozinho. Para operar à mão:
 
-go run ./cmd/migrate up        # aplica tudo que estiver pendente
-go run ./cmd/migrate down      # reverte tudo
-go run ./cmd/migrate steps -1  # reverte exatamente uma
-go run ./cmd/migrate version   # versão atual, e se está dirty
-```
+| Onde | Aplicar | Reverter uma | Reverter tudo | Versão |
+| --- | --- | --- | --- | --- |
+| Compose | `docker compose run --rm migrate up` | `docker compose run --rm migrate steps -1` | `docker compose run --rm migrate down` | `docker compose run --rm migrate version` |
+| Host | `make migrate-up` | `make migrate-down` | `go run ./cmd/migrate down` | `go run ./cmd/migrate version` |
 
-`make migrate-up` e `make migrate-down` embrulham a aplicação e a reversão de uma. No Compose a
-aplicação é automática (serviço `migrate`); para reverter lá dentro,
-`docker compose run --rm migrate down`. Uma migration que falha deixa o schema *dirty*;
-`version` reporta isso, e a situação precisa ser resolvida à mão antes de seguir.
+No host, `DATABASE_URL` aponta para `localhost:5432` por default no `Makefile`. Uma migration que
+falha deixa o schema *dirty*; `version` reporta isso, e a situação precisa ser resolvida à mão.
 
-## Autenticação e identidades de teste
-
-Toda rota de carteira e de operação exige um access token OIDC válido; os health checks e as
-métricas são públicos e não expõem dado financeiro. O realm `wagering` é importado pelo Compose
-com estes clients `client_credentials` — segredos locais, todos no formato `<clientId>-secret`:
-
-| Client | Escopo | Pode |
-| --- | --- | --- |
-| `internal-service` | `wallets` | abrir carteira, ler carteira e ledger, reconciliar |
-| `provider-a`, `provider-b` | `wagering` + claim `provider_id` | submeter e consultar **apenas as próprias** operações |
-| `provider-expiring` | `wagering` | o mesmo, com token de um segundo — existe para o teste de expiração |
-| `outsider` | nenhum | nada; o token tem outra audiência, para o teste de audiência |
-
-`wagering-api` é o resource server: nunca pede token, apenas nomeia a audiência que a API aceita.
-`KC_HOSTNAME` fixa o issuer em `http://localhost:8081/realms/wagering`, de modo que um token
-pedido do host é o mesmo token que o container da API valida; o container busca o JWKS pela rede
-do Compose, que é para o que serve `OIDC_DISCOVERY_URL`.
-
-```sh
-token() {
-  curl -s http://localhost:8081/realms/wagering/protocol/openid-connect/token \
-    -d grant_type=client_credentials -d client_id="$1" -d client_secret="$1-secret" \
-  | sed -E 's/.*"access_token":"([^"]+)".*/\1/'
-}
-INTERNAL=$(token internal-service)
-PROVIDER=$(token provider-a)
-```
-
-Token ausente, malformado, expirado ou com audiência errada recebe `401` com
-`WWW-Authenticate: Bearer`; um token de provedor numa rota de carteira recebe `403`, e o interno
-numa rota de operação também. Todas as respostas de erro são `application/problem+json` e
-nenhuma carrega dado de carteira.
-
-## Exemplos de chamadas
-
-### Abrir e ler uma carteira
-
-```sh
-curl -s -X POST http://localhost:8080/wallets \
-  -H "Authorization: Bearer $INTERNAL" -H 'Content-Type: application/json' \
-  -d '{"playerId":"0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
-       "initialBalance":{"amount":"1000.00","currency":"BRL"}}'
-# -> {"id":"...","playerId":"...","balance":{"amount":"1000.00","currency":"BRL"},"version":1}
-
-curl -s http://localhost:8080/wallets/$WALLET -H "Authorization: Bearer $INTERNAL"
-curl -s "http://localhost:8080/wallets/$WALLET/ledger?limit=50" -H "Authorization: Bearer $INTERNAL"
-curl -s "http://localhost:8080/wallets/$WALLET/ledger?limit=50&cursor=$CURSOR" -H "Authorization: Bearer $INTERNAL"
-```
-
-A abertura com saldo positivo cria, no mesmo commit, a carteira, uma transação `OPENING`
-`PROCESSED`, o lançamento de crédito e os eventos de outbox. Abrir uma segunda carteira para o
-mesmo jogador e moeda responde `409`. O ledger pagina por cursor opaco com ordenação estável, e
-a resposta traz o `nextCursor` da próxima página.
-
-### Submeter uma operação
-
-```sh
-curl -s -X POST http://localhost:8080/wagering/transactions \
-  -H "Authorization: Bearer $PROVIDER" -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: provider-a:transaction-123' \
-  -d '{"providerId":"provider-a","externalTransactionId":"transaction-123",
-       "playerId":"0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1","walletId":"'"$WALLET"'",
-       "roundId":"round-987","gameId":"fortune-chimp","kind":"BET",
-       "money":{"amount":"25.00","currency":"BRL"}}'
-# -> {"transactionId":"...","status":"PROCESSED","balance":{"amount":"975.00","currency":"BRL"},"idempotentReplay":false}
-```
-
-O header `Idempotency-Key` é obrigatório e nunca é substituído por um valor calculado pelo
-servidor. Reenviar a mesma chamada devolve o resultado persistido com `idempotentReplay: true` e
-não debita nada; a mesma chave com corpo diferente devolve `409`. Para `REFUND` e `ROLLBACK`,
-acrescente `referenceExternalTransactionId` ao corpo — se a referência ainda não chegou, a
-operação é registrada como `PENDING_REFERENCE` e respondida `202`, e o worker de referências
-assume a espera.
-
-Consultas:
-
-```sh
-curl -s http://localhost:8080/wagering/transactions/$TRANSACTION -H "Authorization: Bearer $PROVIDER"
-curl -s http://localhost:8080/providers/provider-a/wagering/transactions/transaction-123 \
-  -H "Authorization: Bearer $PROVIDER"
-```
-
-Os códigos principais — a tabela completa, por classe de erro, está em
-[`ARCHITECTURE.md`](ARCHITECTURE.md), em "Contratos HTTP", e os `failureCode` de cada
-rejeição em "Máquina de estados e códigos de falha":
-
-| Situação | Status |
-| --- | --- |
-| Processada, ou replay de uma processada | `200` |
-| Reversão esperando a referência | `202` |
-| Entrada inválida, `Idempotency-Key` ausente, `kind` inutilizável | `400` |
-| Token não autoriza o `providerId` do corpo | `403` |
-| Chave reusada com outro conteúdo, ou operação reenviada sob segunda chave | `409` |
-| Rejeição de negócio — o `code` é o `failureCode` estável | `422` |
-| Carteira disputada além do `DB_LOCK_TIMEOUT`, ou dependência indisponível | `503` + `Retry-After` |
-
-### Reconciliação
-
-```sh
-curl -s -X POST http://localhost:8080/wallets/$WALLET/reconciliation -H "Authorization: Bearer $INTERNAL"
-# -> {"walletId":"...","storedBalance":{...},"calculatedBalance":{...},
-#     "difference":{"amount":"0.00","currency":"BRL"},"consistent":true,"checkedEntries":2}
-```
-
-Uma única consulta lê o saldo armazenado ao lado do saldo reconstruído do ledger, de modo que um
-movimento que comita no meio da leitura não apareça como divergência. A reconciliação nunca altera
-saldo; uma divergência real vai para o corpo, para o log e para a métrica
-`reconciliation_divergences`.
-
-### A mesma operação por SQS
-
-O consumidor lê `wager-transactions.fifo` neste envelope:
-
-```json
-{
-  "messageId": "msg-123",
-  "type": "WagerTransactionRequested",
-  "occurredAt": "2026-09-08T12:00:00.000Z",
-  "data": {
-    "providerId": "provider-a",
-    "externalTransactionId": "transaction-123",
-    "idempotencyKey": "provider-a:transaction-123",
-    "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
-    "walletId": "0192f291-27dd-7d3f-8071-5f8685deef37",
-    "roundId": "round-987",
-    "gameId": "fortune-chimp",
-    "kind": "BET",
-    "money": { "amount": "25.00", "currency": "BRL" }
-  }
-}
-```
-
-```sh
-docker compose exec localstack awslocal sqs send-message \
-  --queue-url http://localhost:4566/000000000000/wager-transactions.fifo \
-  --message-group-id "$WALLET" --message-deduplication-id msg-123 \
-  --message-body "$(cat mensagem.json)"
-```
-
-A mensagem é decodificada nos mesmos parâmetros que o handler HTTP monta e entregue ao mesmo caso
-de uso, então o resultado — inclusive a idempotência — é idêntico entre os dois transportes. O
-registro de inbox é escrito no mesmo commit da mudança de domínio, e a mensagem só é removida
-depois desse commit. O que acontece em reentrega, conflito de hash, rejeição de negócio e falha
-transitória está em [`ARCHITECTURE.md`](ARCHITECTURE.md), em "Inbox e outbox" e "Contratos das filas".
-
-## Especificação OpenAPI
-
-[`api/openapi.yaml`](api/openapi.yaml) descreve a superfície HTTP inteira em OpenAPI 3.1: as sete
-rotas de negócio, os health checks e o `/metrics`, os esquemas de `Money`, carteira, lançamento,
-transação e do corpo de erro RFC 9457, e o status esperado de cada classe de erro. O escopo exigido
-por rota e o fluxo `client_credentials` do Keycloak estão no `securitySchemes`, então um cliente
-gerado do arquivo já pede o token no lugar certo.
-
-O arquivo é escrito à mão, não gerado dos handlers — nada valida um contra o outro, então uma rota
-nova precisa de edição aqui também. Para ler ou exercitar, sem instalar nada:
-
-```sh
-docker run --rm --name api-docs -p 8082:8080 \
-  -e SWAGGER_JSON=/spec/openapi.yaml \
-  -v "$PWD/api:/spec" \
-  swaggerapi/swagger-ui
-# -> http://localhost:8082
-```
-
-`npx @redocly/cli lint api/openapi.yaml` valida a especificação, e
-`npx @redocly/cli preview-docs api/openapi.yaml` serve a mesma documentação em Redoc.
-
-## Testes
-
-Só precisam de Go:
-
-```sh
-go test ./...        # os testes de unidade, sem containers
-go test -race ./...  # os mesmos, sob o detector de race
-go vet ./...
-gofmt -l .           # não imprime nada quando a formatação está limpa
-```
-
-### Preparando as dependências dos testes
-
-As suítes abaixo sobem **containers reais** de PostgreSQL, Keycloak e LocalStack por conta
-própria, via testcontainers — não reaproveitam o ambiente do Compose e nunca usam mocks.
-Basta um Docker rodando e as imagens disponíveis; para pré-baixá-las e não pagar isso dentro do
-timeout do teste:
-
-```sh
-docker pull postgres:17-alpine
-docker pull quay.io/keycloak/keycloak:26.4
-docker pull localstack/localstack:4
-```
-
-### Integração (build tag `integration`)
-
-```sh
-go test -race -tags=integration -timeout 20m ./...
-```
-
-Cobre migrations `up` e `down`, constraints e imutabilidade do ledger, atomicidade financeira,
-inbox e reentrega, outbox concorrente, retry, DLQ, a integração real com o IdP (token ausente,
-inválido, expirado, audiência errada, isolamento entre provedores) e a composição do Fx com seu
-start e stop. Cobre também **a mesma operação entregue pelos dois transportes** — uma `BET` por
-HTTP e a mesma por SQS, com o valor escrito de outra forma — provando um único débito
-(`TestTheSameOperationOverHTTPAndSQSAppliesOnce`).
-
-### Múltiplas instâncias e simulações de falha (build tags `integration,system`)
-
-`test/system` compila a API com o detector de race e roda **três processos independentes** contra
-containers compartilhados, para que as garantias de concorrência sejam demonstradas entre processos
-e não entre goroutines:
-
-```sh
-go test -race -tags 'integration,system' -timeout 40m ./test/system/...
-```
-
-O que está demonstrado ali:
-
-| Cenário | Evidência |
-| --- | --- |
-| A mesma aposta 50 vezes em paralelo | um único débito no ledger |
-| Duas apostas de 80.00 contra saldo de 100.00 | uma processada, uma rejeitada por saldo insuficiente, saldo final 20.00, um único débito — e reenvios não mudam isso |
-| Carteiras distintas | avançam em paralelo mesmo com uma delas travada |
-| Consumidor morto com `SIGKILL` | a mensagem é reentregue e tratada por outra instância |
-| Reversão em `PENDING_REFERENCE` cuja instância morre | outra instância assume a espera, e a aposta reenviada depois da queda é replay com o saldo original |
-| Três publishers sobre um mesmo outbox | publicação recuperada, `eventId` preservado |
-
-Todo cenário termina reconciliando contra o ledger cada carteira que tocou.
-
-O `Makefile` embrulha tudo: `run`, `build`, `test`, `test-race`, `test-integration`,
-`test-system`, `vet`, `fmt`, `migrate-up`, `migrate-down`.
-
-## Observabilidade
+### 9.5. Observabilidade
 
 - **Logs** JSON em stdout, com `correlationId`, `messageId`, `transactionId`, `walletId` e
-  `providerId` quando disponíveis — nunca credenciais nem payload financeiro completo. O
-  `correlationId` nasce na requisição ou na mensagem, atravessa o contexto e chega aos envelopes
-  publicados.
+  `providerId` quando disponíveis — nunca credenciais nem payload financeiro completo. Mande
+  `X-Correlation-Id` numa requisição para segui-la nos logs e nos eventos que ela causou.
 - **Métricas** em `GET /metrics`, como JSON do `expvar`: `wager_outcomes` por status,
   `wager_duplicates`, `wallet_concurrency_conflicts`, `reference_retries`, `sqs_dead_lettered`,
-  `reconciliation_divergences`, `outbox_lag_seconds` e `wager_processing` (contagem e total, para
-  a latência média).
-- **Health checks** em `GET /health/live` (processo) e `GET /health/ready` (pool do Postgres e
-  fila de entrada), ambos públicos.
+  `reconciliation_divergences`, `outbox_lag_seconds` e `wager_processing` (contagem e total).
+- **Health checks** públicos: `GET /health/live` (o processo) e `GET /health/ready` (pool do
+  Postgres e fila de entrada).
 
-## Estrutura do projeto
+```sh
+curl -s http://localhost:8080/metrics | jq '{wager_outcomes, wager_duplicates, outbox_lag_seconds}'
+```
+
+### 9.6. Rodar a API fora do Docker
+
+Para depurar a API no host. Suba só a infraestrutura — sem o serviço `api`, que ocuparia a
+porta 8080:
+
+```sh
+docker compose up -d postgres keycloak localstack
+```
+
+Em outro terminal, carregue o `.env.example` e troque os nomes de serviço do Compose pelos
+endereços publicados no host:
+
+```sh
+set -a; . ./.env.example; set +a
+export DATABASE_URL='postgres://wagering:wagering@localhost:5432/wagering?sslmode=disable'
+export OIDC_DISCOVERY_URL=http://localhost:8081/realms/wagering
+export SQS_ENDPOINT=http://localhost:4566
+export SQS_WAGER_TRANSACTIONS_QUEUE_URL=http://localhost:4566/000000000000/wager-transactions.fifo
+export SQS_WAGER_TRANSACTIONS_DLQ_URL=http://localhost:4566/000000000000/wager-transactions-dlq.fifo
+export SQS_EVENTS_QUEUE_URL=http://localhost:4566/000000000000/wager-events.fifo
+make migrate-up
+make run
+```
+
+`OIDC_ISSUER_URL` não muda: `KC_HOSTNAME` fixa o issuer em `http://localhost:8081/realms/wagering`,
+então o token é o mesmo nos dois modos. As seções 3 a 5 funcionam igual.
+
+### 9.7. Estrutura do projeto
 
 ```
 cmd/api            raiz de composição (o wiring do Fx vive no package main) e o binário da API
@@ -441,9 +575,3 @@ migrations         SQL versionado, embarcado com //go:embed
 api                a especificação OpenAPI da superfície HTTP
 test/system        a suíte multi-instância
 ```
-
-| Documento | Conteúdo |
-| --- | --- |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | As decisões e o que cada uma custa: dinheiro, transações, idempotência, locks, referências pendentes, reversões, inbox/outbox, autenticação, autorização, Fx, shutdown — com as interpretações adotadas e as limitações |
-| [`DESAFIO.md`](DESAFIO.md) | O enunciado original, preservado sem edição |
-| [`api/openapi.yaml`](api/openapi.yaml) | O contrato HTTP em OpenAPI 3.1: rotas, esquemas, escopos e status por classe de erro |
