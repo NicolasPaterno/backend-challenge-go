@@ -1,4 +1,4 @@
-// Package metrics holds the counters §12 requires. expvar keeps them in the
+// Package metrics holds the counters the brief requires. expvar keeps them in the
 // standard library — no registry of our own, no dependency — and serves them
 // as JSON at /metrics.
 package metrics

@@ -11,16 +11,16 @@ CREATE TABLE wallet_ledger_entries (
 
     created_at TIMESTAMPTZ NOT NULL,
 
-    -- §5.8: one entry per movement, so a redelivered operation cannot post twice.
+    -- one entry per movement, so a redelivered operation cannot post twice.
     CONSTRAINT wallet_ledger_entries_wallet_transaction_unique UNIQUE (wallet_id, transaction_id),
-    -- §6.4, restated here so no client can write a row the domain would refuse.
+    -- restated here so no client can write a row the domain would refuse.
     CONSTRAINT wallet_ledger_entries_equation CHECK (
         balance_after_minor = balance_before_minor
             + CASE direction WHEN 'CREDIT' THEN amount_minor ELSE -amount_minor END
     )
 );
 
--- §5.5: append-only, enforced against admin sessions and future bugs too.
+-- append-only, enforced against admin sessions and future bugs too.
 CREATE FUNCTION wallet_ledger_entries_append_only() RETURNS TRIGGER AS $$
 BEGIN
     RAISE EXCEPTION 'wallet_ledger_entries is append-only: % is refused', TG_OP

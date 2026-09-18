@@ -73,7 +73,7 @@ func TestOpenCreditsTheOpeningWithoutMovingTheVersionPastOne(t *testing.T) {
 	opened, repo := open(t, "1000.00")
 
 	if opened.Version() != 1 {
-		t.Errorf("version = %d, want 1 (§9)", opened.Version())
+		t.Errorf("version = %d, want 1", opened.Version())
 	}
 	if got := opened.Balance().String(); got != "1000.00 BRL" {
 		t.Errorf("balance = %s, want 1000.00 BRL", got)
@@ -96,14 +96,14 @@ func TestOpenWithAZeroBalanceWritesNoOpeningAndNoEntry(t *testing.T) {
 	opened, repo := open(t, "0.00")
 
 	if repo.opening != nil || repo.entry != nil {
-		t.Errorf("opening = %v, entry = %v, want neither (§9)", repo.opening, repo.entry)
+		t.Errorf("opening = %v, entry = %v, want neither", repo.opening, repo.entry)
 	}
 	if opened.Version() != 1 || !opened.Balance().IsZero() {
 		t.Errorf("wallet = %s at version %d, want 0.00 at version 1", opened.Balance(), opened.Version())
 	}
 }
 
-// §9: the opening's two events share the wallet's commit, and a zero opening
+// the opening's two events share the wallet's commit, and a zero opening
 // writes neither.
 func TestOpenWritesItsEventsToTheOutbox(t *testing.T) {
 	_, repo := open(t, "1000.00")
@@ -128,7 +128,7 @@ func TestOpenWritesItsEventsToTheOutbox(t *testing.T) {
 		t.Fatalf("data is %T, want events.WalletBalanceChanged", repo.outbox[1].Data)
 	}
 	if balance.WalletVersion != 1 {
-		t.Errorf("walletVersion = %d, want the 1 §9 pins the opening at", balance.WalletVersion)
+		t.Errorf("walletVersion = %d, want the 1 an opening is pinned at", balance.WalletVersion)
 	}
 	if got := balance.BalanceAfter.String(); got != "1000.00 BRL" {
 		t.Errorf("balanceAfter = %s, want 1000.00 BRL", got)

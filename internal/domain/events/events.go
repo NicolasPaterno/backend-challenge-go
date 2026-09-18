@@ -1,4 +1,4 @@
-// Package events holds the integration events §11 requires: one concrete type
+// Package events holds the integration events the brief requires: one concrete type
 // per event, inside the envelope a consumer receives.
 package events
 
@@ -24,10 +24,10 @@ const (
 const version = 1
 
 // Envelope is the published form. EventType and Version are set by the
-// constructors and are not parameters, so no caller can mislabel an event (§11).
+// constructors and are not parameters, so no caller can mislabel an event.
 //
 // AggregateID is the wallet for every event, including the transaction ones:
-// §6.2 makes the wallet the root of the financial aggregate.
+// The brief makes the wallet the root of the financial aggregate.
 type Envelope struct {
 	EventID       uuid.UUID  `json:"eventId"`
 	EventType     string     `json:"eventType"`
@@ -105,8 +105,8 @@ func NewWalletBalanceChanged(eventID, correlationID uuid.UUID, entry *wallet.Led
 		})
 }
 
-// The domain stores timestamps as given and never converts (03 §9), so UTC is
-// applied here, where §11 requires it.
+// The domain stores timestamps as given and never converts, so UTC is
+// applied here, where the brief requires it.
 func envelope(eventID, correlationID uuid.UUID, eventType string, aggregateID uuid.UUID, occurredAt time.Time, data any) Envelope {
 	return Envelope{
 		EventID:       eventID,
@@ -120,7 +120,7 @@ func envelope(eventID, correlationID uuid.UUID, eventType string, aggregateID uu
 }
 
 // Copies out of the aggregate, so a later transition cannot alter a payload
-// already written (§11).
+// already written.
 func snapshot(t *wagering.WagerTransaction) wagerTransaction {
 	return wagerTransaction{
 		TransactionID:         t.ID(),

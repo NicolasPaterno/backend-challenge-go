@@ -32,7 +32,7 @@ func verifier(t *testing.T) (*auth.Verifier, string) {
 }
 
 // The provider identity comes from the token's claims and from nowhere the
-// caller controls (§2).
+// caller controls.
 func TestVerifyMapsClaimsToIdentity(t *testing.T) {
 	v, issuer := verifier(t)
 

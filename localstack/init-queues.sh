@@ -40,14 +40,14 @@ DLQ_ARN=$(awslocal sqs get-queue-attributes \
 
 # maxReceiveCount 3 with a 30s visibility timeout. The consumer dead-letters a
 # permanent failure itself; this is the backstop for a transient one that never
-# stops failing (§10).
+# stops failing.
 REDRIVE=$(printf '{"deadLetterTargetArn":"%s","maxReceiveCount":"3"}' "$DLQ_ARN" | as_json_string)
 create_fifo wager-transactions.fifo ",\"VisibilityTimeout\":\"30\",\"RedrivePolicy\":\"$REDRIVE\""
 
-# §2: access to the messaging layer is controlled by broker credentials and
+# access to the messaging layer is controlled by broker credentials and
 # policies. Each principal gets the narrowest action it needs. LocalStack's
 # community edition stores these documents but does not enforce them, which
-# docs/consumer.md records as a limitation.
+# ARCHITECTURE.md records as a limitation.
 set_policy wager-transactions.fifo     wagering-producer '["sqs:SendMessage"]'
 set_policy wager-transactions-dlq.fifo wagering-api      '["sqs:SendMessage","sqs:ReceiveMessage"]'
 set_policy wager-events.fifo           wagering-api      '["sqs:SendMessage"]'

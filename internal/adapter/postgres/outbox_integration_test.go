@@ -18,7 +18,7 @@ import (
 )
 
 // Each publisher gets its own pool, so contention here is between connections
-// rather than between goroutines sharing one (§13.6).
+// rather than between goroutines sharing one.
 func newOutboxStore(t *testing.T, databaseURL string) (*pgadapter.OutboxStore, *pgxpool.Pool) {
 	t.Helper()
 
@@ -93,7 +93,7 @@ func TestTwoPublishersNeverClaimTheSameRow(t *testing.T) {
 	}
 }
 
-// §11's second recovery case: the send reached the queue but the confirming
+// the second recovery case: the send reached the queue but the confirming
 // commit never landed. The row stays claimable and comes back with the same
 // eventId, because the publisher never rewrites the payload.
 func TestARowLostBetweenSendAndConfirmationIsRepublishedUnchanged(t *testing.T) {

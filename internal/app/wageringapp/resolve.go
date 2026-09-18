@@ -10,8 +10,8 @@ import (
 )
 
 // ResolveDue re-runs the reversals whose wait has come round, one SQL
-// transaction each so a wallet held by another writer delays only its own
-// (§8). Every record is attempted even when one fails: a record that errors
+// transaction each so a wallet held by another writer delays only its own.
+// Every record is attempted even when one fails: a record that errors
 // commits nothing, so leaving the batch on the first failure would let it block
 // the queue behind it forever.
 func (s *Service) ResolveDue(ctx context.Context, limit int) (int, error) {

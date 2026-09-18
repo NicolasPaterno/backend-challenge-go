@@ -1,4 +1,4 @@
-// Package auth verifies OIDC access tokens against the issuer's JWKS (§2). A
+// Package auth verifies OIDC access tokens against the issuer's JWKS. A
 // token is never decoded without verification.
 package auth
 
@@ -15,13 +15,13 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/platform/config"
 )
 
-// ScopeWallets guards the wallet surface, which §2 restricts to the internal
+// ScopeWallets guards the wallet surface, which the brief restricts to the internal
 // service. Provider tokens do not carry it.
 const ScopeWallets = "wallets"
 
 // ScopeWagering guards the operation surface, which only providers reach. The
 // scope says the caller may submit at all; which provider it may act as comes
-// from the provider_id claim and from nowhere else (§2).
+// from the provider_id claim and from nowhere else.
 const ScopeWagering = "wagering"
 
 var errNotDiscovered = errors.New("auth: the issuer has not been discovered yet")
@@ -31,8 +31,7 @@ var errNotDiscovered = errors.New("auth: the issuer has not been discovered yet"
 const tokenTypeBearer = "Bearer"
 
 // Identity is what the token says the caller is. ProviderID comes from the
-// token and from nowhere else, so a request body cannot claim another provider
-// (§2).
+// token and from nowhere else, so a request body cannot claim another provider.
 type Identity struct {
 	Subject    string
 	ProviderID string
@@ -58,7 +57,7 @@ type Verifier struct {
 
 // New discovers the issuer during startup rather than in the constructor, so an
 // IdP that is still booting fails the start hook with a named dependency error
-// instead of a graph that refuses to build (§4).
+// instead of a graph that refuses to build.
 func New(lc fx.Lifecycle, cfg config.Config) *Verifier {
 	v := &Verifier{}
 
@@ -109,7 +108,7 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (Identity, error
 
 	// Keycloak marks the token's purpose in typ. Without this an ID token that
 	// somehow carried the API's audience would authorize a call, which is the
-	// token-confusion §2 asks the resource server to refuse.
+	// token-confusion the brief asks the resource server to refuse.
 	if claims.Type != tokenTypeBearer {
 		return Identity{}, fmt.Errorf("auth: token type %q is not an access token", claims.Type)
 	}

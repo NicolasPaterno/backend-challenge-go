@@ -1,8 +1,8 @@
--- §11: the event is written in the commit that caused it and published later,
+-- the event is written in the commit that caused it and published later,
 -- so nothing can reach a consumer before the money moved.
 CREATE TABLE outbox_events (
     event_id     UUID NOT NULL PRIMARY KEY,
-    -- §6.2 makes the wallet the root of the financial aggregate, so every event
+    -- The brief makes the wallet the root of the financial aggregate, so every event
     -- here belongs to one. 14 groups the queue by it.
     aggregate_id UUID NOT NULL,
     event_type   TEXT NOT NULL,

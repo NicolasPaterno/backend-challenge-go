@@ -1,4 +1,4 @@
-// Package logging provides the process-wide JSON logger (spec §12).
+// Package logging provides the process-wide JSON logger.
 package logging
 
 import (
@@ -23,7 +23,7 @@ func New(cfg config.Config) *slog.Logger {
 }
 
 // correlated stamps every line logged with a context — the *Context methods of
-// slog — with the id that request or message is running under (§12), so no call
+// slog — with the id that request or message is running under, so no call
 // site has to remember to pass it.
 type correlated struct{ slog.Handler }
 

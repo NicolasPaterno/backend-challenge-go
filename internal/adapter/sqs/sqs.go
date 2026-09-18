@@ -1,4 +1,4 @@
-// Package sqs carries both directions of §10 and §11: the publisher that sends
+// Package sqs carries both directions of the brief: the publisher that sends
 // outbox events out, and the consumer that brings wager operations in.
 package sqs
 
@@ -37,9 +37,9 @@ func NewPublisher(client *awssqs.Client, cfg config.Config) *Publisher {
 }
 
 // The group is the aggregate, so one wallet's events stay ordered while
-// different wallets are delivered in parallel (§5.6). The deduplication id is
+// different wallets are delivered in parallel. The deduplication id is
 // the eventId, which makes a republication after a crash between send and
-// confirmation a no-op inside the queue's dedup window (§11).
+// confirmation a no-op inside the queue's dedup window.
 func (p *Publisher) Publish(ctx context.Context, e outbox.Event) error {
 	body := string(e.Payload)
 	group := e.AggregateID.String()

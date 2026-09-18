@@ -36,7 +36,7 @@ func TestReadinessFollowsItsDependenciesAndHealthStaysPublic(t *testing.T) {
 	defer app.RequireStop()
 
 	base := "http://" + server.Addr
-	// No token anywhere in this test: the health checks are public (§9).
+	// No token anywhere in this test: the health checks are public.
 	ready := func() (int, map[string]string) {
 		resp, err := http.Get(base + "/health/ready")
 		if err != nil {
@@ -110,7 +110,7 @@ func TestMetricsCountTheOutcomesAndThePublicEndpointServesThem(t *testing.T) {
 		"outbox_lag_seconds",
 	} {
 		if _, ok := published[name]; !ok {
-			t.Errorf("metric %q is missing (§12)", name)
+			t.Errorf("metric %q is missing", name)
 		}
 	}
 
@@ -170,7 +170,7 @@ func TestCorrelationIdReachesTheEventItCaused(t *testing.T) {
 	}
 }
 
-// §12: the logs must carry the identifiers and none of the secrets.
+// the logs must carry the identifiers and none of the secrets.
 func TestLogsCarryTheIdentifiersAndNoCredentials(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "debug")
 
@@ -216,13 +216,13 @@ func TestLogsCarryTheIdentifiersAndNoCredentials(t *testing.T) {
 			t.Errorf("a credential reached the logs")
 		}
 	}
-	// The amounts are the financial payload §12 keeps out of the logs.
+	// The amounts are the financial payload the brief keeps out of the logs.
 	if strings.Contains(logs, `"amount"`) || strings.Contains(logs, "10.00") {
 		t.Errorf("a financial payload reached the logs")
 	}
 	for _, identifier := range []string{"correlationId", "walletId", "transactionId", "providerId"} {
 		if !strings.Contains(logs, identifier) {
-			t.Errorf("logs carry no %s (§12)", identifier)
+			t.Errorf("logs carry no %s", identifier)
 		}
 	}
 	if !strings.Contains(logs, `"level":`) || !strings.Contains(logs, `"msg":`) {

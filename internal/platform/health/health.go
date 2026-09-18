@@ -1,4 +1,4 @@
-// Package health serves the public health checks (§9). Liveness must stay 200
+// Package health serves the public health checks. Liveness must stay 200
 // while dependencies are degraded; readiness reports PostgreSQL and SQS.
 package health
 

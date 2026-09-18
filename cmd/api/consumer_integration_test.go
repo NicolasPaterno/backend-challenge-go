@@ -18,7 +18,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/testsupport"
 )
 
-// message is §10's envelope, built around the same business fields the HTTP
+// message is the envelope, built around the same business fields the HTTP
 // body carries so the two hash identically.
 func message(messageID, externalID, playerID, walletID, kind, amount string) string {
 	return fmt.Sprintf(`{"messageId":%q,"type":"WagerTransactionRequested",`+
@@ -30,7 +30,7 @@ func message(messageID, externalID, playerID, walletID, kind, amount string) str
 }
 
 // send puts a message on the queue the consumer under test reads, grouped by
-// wallet (§10).
+// wallet.
 func (w *wagering) send(client *awssqs.Client, walletID, dedup, body string) {
 	w.t.Helper()
 	testsupport.Send(w.t, client, testsupport.InboundQueue(w.t), body, walletID, dedup)
@@ -53,9 +53,9 @@ func (w *wagering) awaitBalance(walletID, want string) {
 	}
 }
 
-// §10 and §13: the same message delivered twice moves money once. FIFO
+// the same message delivered twice moves money once. FIFO
 // deduplication is deliberately defeated with two deduplication ids, so what is
-// proved is the application's inbox, not the queue's (§5.3).
+// proved is the application's inbox, not the queue's.
 func TestARedeliveredMessageDebitsOnce(t *testing.T) {
 	api := startWagering(t)
 	client := testsupport.SQSClient(t, testsupport.SQSEndpoint(t))
@@ -82,7 +82,7 @@ func TestARedeliveredMessageDebitsOnce(t *testing.T) {
 	}
 }
 
-// §10: HTTP and SQS share the use case, so one operation delivered over both
+// HTTP and SQS share the use case, so one operation delivered over both
 // produces one financial effect.
 func TestTheSameOperationOverHTTPAndSQSAppliesOnce(t *testing.T) {
 	api := startWagering(t)
@@ -110,7 +110,7 @@ func TestTheSameOperationOverHTTPAndSQSAppliesOnce(t *testing.T) {
 	}
 }
 
-// §10 separates the two failure kinds. A message the domain refuses can never
+// The brief separates the two failure kinds. A message the domain refuses can never
 // succeed, so it goes to the dead-letter queue at once rather than holding its
 // message group for three retries that cannot change the answer.
 func TestAnUnhandleableMessageIsDeadLetteredAtOnce(t *testing.T) {
@@ -120,9 +120,9 @@ func TestAnUnhandleableMessageIsDeadLetteredAtOnce(t *testing.T) {
 	walletID := api.openWallet(playerID, "100.00")
 
 	refused := []struct{ dedup, body string }{
-		// OPENING is refused whatever transport carries it (§6.3).
+		// OPENING is refused whatever transport carries it.
 		{"opening", message("msg-opening", "transaction-opening", playerID, walletID, "OPENING", "25.00")},
-		// A non-zero LOSS never becomes a record either (§7).
+		// A non-zero LOSS never becomes a record either.
 		{"loss", message("msg-loss", "transaction-loss", playerID, walletID, "LOSS", "25.00")},
 		{"broken", `{"messageId":"msg-broken","data":{`},
 	}
@@ -152,7 +152,7 @@ func TestAnUnhandleableMessageIsDeadLetteredAtOnce(t *testing.T) {
 	}
 }
 
-// §13.5: the consumer dies after the commit and before the deletion. The
+// the consumer dies after the commit and before the deletion. The
 // redelivery must be a no-op, which is what the inbox is for.
 func TestAMessageRedeliveredAfterACommitIsANoOp(t *testing.T) {
 	api := startWagering(t)
@@ -176,7 +176,7 @@ func TestAMessageRedeliveredAfterACommitIsANoOp(t *testing.T) {
 	}
 }
 
-// §10 and §4: on shutdown the consumer stops fetching and leaves nothing
+// on shutdown the consumer stops fetching and leaves nothing
 // half-done — a message it never got to is still there for the next instance.
 func TestShutdownStopsFetchingAndLeavesTheQueueIntact(t *testing.T) {
 	api := startWagering(t)
@@ -205,7 +205,7 @@ func TestShutdownStopsFetchingAndLeavesTheQueueIntact(t *testing.T) {
 	}
 }
 
-// inbox counts the rows §6.5 requires, which is how a test tells "handled once"
+// inbox counts the rows the brief requires, which is how a test tells "handled once"
 // from "handled twice with the same outcome".
 func (w *wagering) inbox() int {
 	w.t.Helper()
@@ -241,7 +241,7 @@ func (w *wagering) holdWallet(walletID string) func() {
 	}
 }
 
-// §10: a confirmed business rejection is terminal, so its message leaves the
+// a confirmed business rejection is terminal, so its message leaves the
 // queue — there is nothing a redelivery could decide differently.
 func TestARejectedOperationRemovesItsMessage(t *testing.T) {
 	api := startWagering(t)
@@ -259,7 +259,7 @@ func TestARejectedOperationRemovesItsMessage(t *testing.T) {
 	}
 }
 
-// §6.5: a reversal that has to wait may finish its inbound message as soon as
+// a reversal that has to wait may finish its inbound message as soon as
 // the pending state is committed; 13's worker takes it from there.
 func TestAPendingReferenceRemovesItsMessageAndIsResolvedByTheWorker(t *testing.T) {
 	api := startWagering(t)
@@ -289,7 +289,7 @@ func TestAPendingReferenceRemovesItsMessageAndIsResolvedByTheWorker(t *testing.T
 	}
 }
 
-// §10: a failure that keeps failing runs out its attempts and the redrive
+// a failure that keeps failing runs out its attempts and the redrive
 // policy moves it. The wallet lock is held throughout, so every handling is a
 // genuine transient failure rather than a refusal the consumer would
 // dead-letter itself.
@@ -318,13 +318,13 @@ func TestAMessageThatKeepsFailingIsRedrivenToTheDeadLetterQueue(t *testing.T) {
 	}
 }
 
-// §10 and §4: shutdown past the deadline abandons the handling in flight rather
+// shutdown past the deadline abandons the handling in flight rather
 // than half-applying it, and the message becomes visible again for another
 // instance.
 func TestShutdownReleasesAnInFlightMessageForRedelivery(t *testing.T) {
 	// The handling is still waiting on the lock when the stop begins, and the
 	// worker's own drain budget is what ends it — well inside the shutdown, so
-	// the hooks after it still get their time and the stop stays clean (§4).
+	// the hooks after it still get their time and the stop stays clean.
 	t.Setenv("DB_LOCK_TIMEOUT", "30s")
 	t.Setenv("SHUTDOWN_TIMEOUT", "15s")
 	t.Setenv("WORKER_DRAIN_TIMEOUT", "1s")
@@ -359,7 +359,7 @@ func TestShutdownReleasesAnInFlightMessageForRedelivery(t *testing.T) {
 	api.awaitInboundQueueCount(client, 1)
 }
 
-// refundMessage is §10's envelope for a reversal, which adds the reference.
+// refundMessage is the envelope for a reversal, which adds the reference.
 func refundMessage(messageID, externalID, reference, playerID, walletID, amount string) string {
 	return fmt.Sprintf(`{"messageId":%q,"type":"WagerTransactionRequested",`+
 		`"occurredAt":"2026-09-08T12:00:00.000Z","data":{`+

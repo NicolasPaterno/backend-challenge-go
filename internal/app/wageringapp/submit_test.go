@@ -204,7 +204,7 @@ func TestPayloadHashIsTakenOverNormalisedMoney(t *testing.T) {
 	rekeyed := p
 	rekeyed.IdempotencyKey = "a-completely-different-key"
 	if PayloadHash(p) != PayloadHash(rekeyed) {
-		t.Error("the idempotency key changed the hash; §9 excludes it")
+		t.Error("the idempotency key changed the hash; the payload hash excludes it")
 	}
 
 	other := p
@@ -279,7 +279,7 @@ func TestSubmitRejectsABetItCannotCover(t *testing.T) {
 	if got := result.Transaction.FailureCode(); got != wagering.FailureInsufficientFunds {
 		t.Errorf("failureCode = %s, want INSUFFICIENT_FUNDS", got)
 	}
-	// 03 §3: a refused debit leaves the aggregate untouched.
+	// a refused debit leaves the aggregate untouched.
 	if got := repo.wallet.Balance().String(); got != "10.00 BRL" {
 		t.Errorf("balance = %s, want 10.00 BRL", got)
 	}
@@ -288,8 +288,8 @@ func TestSubmitRejectsABetItCannotCover(t *testing.T) {
 	}
 }
 
-// §11 owes a rejection event to both, so both must be recorded, not returned as
-// an error. One code for the two denies an enumeration oracle (§2).
+// The brief owes a rejection event to both, so both must be recorded, not returned as
+// an error. One code for the two denies an enumeration oracle.
 func TestSubmitRecordsWalletNotFound(t *testing.T) {
 	tests := map[string]func(*SubmitParams){
 		"another player's wallet": func(p *SubmitParams) { p.PlayerID = uuid.NewV7() },
@@ -407,8 +407,8 @@ func TestSubmitRefusesOpening(t *testing.T) {
 	}
 }
 
-// §11: the outcome decides the events, and they are handed to the repository
-// for the commit that carries the movement (§5.4).
+// the outcome decides the events, and they are handed to the repository
+// for the commit that carries the movement.
 func TestSubmitWritesTheEventsItsOutcomeOwes(t *testing.T) {
 	tests := map[string]struct {
 		balance string
@@ -420,7 +420,7 @@ func TestSubmitWritesTheEventsItsOutcomeOwes(t *testing.T) {
 			[]string{events.TypeWagerTransactionProcessed, events.TypeWalletBalanceChanged}},
 		"win": {"100.00", wagering.KindWin, "25.00",
 			[]string{events.TypeWagerTransactionProcessed, events.TypeWalletBalanceChanged}},
-		// §7: a LOSS produces WagerTransactionProcessed and no balance change.
+		// a LOSS produces WagerTransactionProcessed and no balance change.
 		"loss": {"100.00", wagering.KindLoss, "0.00",
 			[]string{events.TypeWagerTransactionProcessed}},
 		"rejection": {"10.00", wagering.KindBet, "25.00",
@@ -454,7 +454,7 @@ func TestSubmitWritesTheEventsItsOutcomeOwes(t *testing.T) {
 	}
 }
 
-// A replay re-applies nothing, so it owes no second copy of the events (§9).
+// A replay re-applies nothing, so it owes no second copy of the events.
 func TestReplayWritesNoFurtherEvents(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")
 	if _, err := service.Submit(context.Background(), p); err != nil {

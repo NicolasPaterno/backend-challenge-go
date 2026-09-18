@@ -77,7 +77,7 @@ func TestLedgerPagesEveryEntryExactlyOnceWhileMoreArrive(t *testing.T) {
 		last := entries[len(entries)-1]
 		after = &walletapp.LedgerCursor{CreatedAt: last.CreatedAt(), ID: last.ID()}
 
-		// §9: a row arriving mid-scan must not shift a boundary. Only the first
+		// a row arriving mid-scan must not shift a boundary. Only the first
 		// two pages add one, so the scan still terminates.
 		if page < 2 {
 			insertEntry(t, pool, opened.ID(), opened.PlayerID(), at.Add(time.Duration(100+page)*time.Millisecond))

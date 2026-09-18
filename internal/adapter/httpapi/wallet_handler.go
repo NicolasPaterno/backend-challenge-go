@@ -24,7 +24,7 @@ func NewWalletHandler(wallets *walletapp.Service, logger *slog.Logger) *WalletHa
 	return &WalletHandler{wallets: wallets, logger: logger}
 }
 
-// The whole wallet surface is internal-service only (§2); a provider token is
+// The whole wallet surface is internal-service only; a provider token is
 // verified and then refused with 403.
 func NewOpenWalletRoute(h *WalletHandler, g *Guard) httpserver.Route {
 	return httpserver.Route{Pattern: "POST /wallets", Handler: g.Require(auth.ScopeWallets, h.open)}

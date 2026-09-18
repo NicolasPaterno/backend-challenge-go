@@ -90,7 +90,7 @@ func (h *WalletHandler) ledger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-// Opaque by construction: the sort key is encoded, never an offset (§9).
+// Opaque by construction: the sort key is encoded, never an offset.
 func encodeCursor(e *wallet.LedgerEntry) string {
 	return base64.RawURLEncoding.EncodeToString(
 		[]byte(e.CreatedAt().UTC().Format(time.RFC3339Nano) + "|" + e.ID().String()))

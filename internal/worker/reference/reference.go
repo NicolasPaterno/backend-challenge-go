@@ -1,5 +1,5 @@
-// Package reference retries the reversals waiting for the operation they undo
-// (§7). It runs in every instance; the claim inside Resolver is what keeps two
+// Package reference retries the reversals waiting for the operation they undo.
+// It runs in every instance; the claim inside Resolver is what keeps two
 // of them off the same record.
 package reference
 
@@ -41,7 +41,7 @@ func New(lc fx.Lifecycle, resolver Resolver, cfg config.Config, logger *slog.Log
 	}
 
 	// Cancelling this is the last resort: OnStop first asks the loop to stop
-	// fetching and lets the cycle in flight finish (§4).
+	// fetching and lets the cycle in flight finish.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	lc.Append(fx.Hook{
@@ -56,7 +56,7 @@ func New(lc fx.Lifecycle, resolver Resolver, cfg config.Config, logger *slog.Log
 		OnStop: func(ctx context.Context) error {
 			close(w.stop)
 
-			// Bounded by the worker's own share, not by the whole shutdown (§4).
+			// Bounded by the worker's own share, not by the whole shutdown.
 			drain, giveUp := context.WithTimeout(ctx, cfg.WorkerDrainTimeout)
 			defer giveUp()
 
@@ -105,7 +105,7 @@ func (w *Worker) run(ctx context.Context) {
 }
 
 func (w *Worker) cycle(ctx context.Context) int {
-	// One id per cycle, so the lines of one sweep can be read together (§12).
+	// One id per cycle, so the lines of one sweep can be read together.
 	ctx = correlation.NewContext(ctx, uuid.NewV7())
 
 	resolved, err := w.resolver.ResolveDue(ctx, w.cfg.ReferenceBatchSize)

@@ -1,5 +1,5 @@
 // Package wallet holds the financial aggregate: a balance that only moves
-// together with the ledger entry recording the movement (§6.2, §6.4).
+// together with the ledger entry recording the movement.
 package wallet
 
 import (
@@ -81,7 +81,7 @@ func (w *Wallet) CreatedAt() time.Time { return w.createdAt }
 
 func (w *Wallet) UpdatedAt() time.Time { return w.updatedAt }
 
-// A shortfall is refused, never overdrawn, and leaves the wallet untouched (§6.2).
+// A shortfall is refused, never overdrawn, and leaves the wallet untouched.
 func (w *Wallet) Debit(entryID, transactionID uuid.UUID, amount money.Money, now time.Time) (*LedgerEntry, error) {
 	return w.move(DirectionDebit, entryID, transactionID, amount, now)
 }
@@ -91,8 +91,8 @@ func (w *Wallet) Credit(entryID, transactionID uuid.UUID, amount money.Money, no
 }
 
 // The only path that writes the balance, so no caller can skip the entry or the
-// version bump (§5.5, §6.2). A zero amount moves nothing: nil entry, version
-// untouched, which is what a LOSS needs (§7).
+// version bump. A zero amount moves nothing: nil entry, version
+// untouched, which is what a LOSS needs.
 func (w *Wallet) move(direction Direction, entryID, transactionID uuid.UUID, amount money.Money, now time.Time) (*LedgerEntry, error) {
 	if !amount.IsValid() {
 		return nil, fmt.Errorf("%w: amount", ErrUninitialized)

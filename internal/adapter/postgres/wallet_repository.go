@@ -54,7 +54,7 @@ const (
 		FROM wallets WHERE id = $1`
 )
 
-// opening, entry and outbox are nil for a zero initial balance (§9).
+// opening, entry and outbox are nil for a zero initial balance.
 func (r *WalletRepository) Open(ctx context.Context, w *wallet.Wallet, opening *wagering.WagerTransaction, entry *wallet.LedgerEntry, outbox []events.Envelope) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, insertWallet,
@@ -136,7 +136,7 @@ func isUniqueViolation(err error) bool {
 // isUniqueViolationOn names the indexes a caller knows how to answer for.
 // wager_transactions carries more than one, and mapping all of them to a single
 // meaning is what made a reversal race read as an idempotency conflict; an
-// index not listed here is a bug and must surface as one (§9).
+// index not listed here is a bug and must surface as one.
 func isUniqueViolationOn(err error, indexes ...string) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.UniqueViolation {
@@ -146,7 +146,7 @@ func isUniqueViolationOn(err error, indexes ...string) bool {
 }
 
 // The wallet is held by another writer for longer than DB_LOCK_TIMEOUT. Nothing
-// was applied, so the caller may retry (§8).
+// was applied, so the caller may retry.
 func isLockNotAvailable(err error) bool {
 	return hasCode(err, pgerrcode.LockNotAvailable)
 }
@@ -215,7 +215,7 @@ func (r *WalletRepository) Ledger(ctx context.Context, walletID uuid.UUID, after
 }
 
 // One statement, so both sides are read from one snapshot: PostgreSQL takes it
-// at statement start, which is what §9 asks of the consistent view. A wallet
+// at statement start, which is what the brief asks of the consistent view. A wallet
 // with no entries is the LEFT JOIN's zero, not a missing row.
 const selectReconciliation = `
 	SELECT w.currency, w.balance_minor,

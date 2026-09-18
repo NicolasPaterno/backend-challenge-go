@@ -58,7 +58,7 @@ func decode(t *testing.T, e events.Envelope) map[string]any {
 }
 
 // UseNumber, so a decoded number never becomes a float64 — which
-// TestInternalContainsNoFloat refuses, rightly (§5.1, A.3.4).
+// TestInternalContainsNoFloat refuses, rightly (A.3.4).
 func object(t *testing.T, raw []byte) map[string]any {
 	t.Helper()
 
@@ -75,7 +75,7 @@ func object(t *testing.T, raw []byte) map[string]any {
 func TestEnvelopeCarriesEveryRequiredField(t *testing.T) {
 	transaction := bet(t, "25.00")
 	eventID, correlationID := uuid.NewV7(), uuid.NewV7()
-	// A zone other than UTC, which §11 requires the envelope to normalise.
+	// A zone other than UTC, which the brief requires the envelope to normalise.
 	occurredAt := time.Date(2026, 9, 8, 9, 0, 0, 0, time.FixedZone("BRT", -3*60*60))
 
 	envelope := events.NewWagerTransactionProcessed(eventID, correlationID, transaction, occurredAt)
@@ -85,7 +85,7 @@ func TestEnvelopeCarriesEveryRequiredField(t *testing.T) {
 	if envelope.Version != 1 {
 		t.Errorf("version = %d, want 1", envelope.Version)
 	}
-	// §6.2: the wallet is the aggregate root, not the transaction.
+	// the wallet is the aggregate root, not the transaction.
 	if envelope.AggregateID != transaction.WalletID() {
 		t.Errorf("aggregateId = %s, want the wallet %s", envelope.AggregateID, transaction.WalletID())
 	}
@@ -114,7 +114,7 @@ func TestEnvelopeCarriesEveryRequiredField(t *testing.T) {
 	}
 }
 
-// §11 names the payload's fields, so a rename breaks a consumer.
+// The brief names the payload's fields, so a rename breaks a consumer.
 func TestWalletBalanceChangedCarriesTheMovement(t *testing.T) {
 	w, err := wallet.New(uuid.NewV7(), uuid.NewV7(), brl(t, "100.00"), time.Now())
 	if err != nil {
@@ -176,7 +176,7 @@ func field(t *testing.T, raw []byte, name string) any {
 	return object(t, raw)[name]
 }
 
-// §11: the outbox payload is an immutable snapshot.
+// the outbox payload is an immutable snapshot.
 func TestPayloadDoesNotFollowLaterTransitions(t *testing.T) {
 	transaction := bet(t, "25.00")
 	envelope := events.NewWagerTransactionProcessed(uuid.NewV7(), uuid.NewV7(), transaction, time.Now())

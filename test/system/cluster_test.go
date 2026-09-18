@@ -1,7 +1,7 @@
 //go:build integration && system
 
 // Package system runs the guarantees against several real processes, each with
-// its own connections and memory, because §8 and §13.4 ask for at least three
+// its own connections and memory, because the brief ask for at least three
 // and an in-process test cannot answer for them.
 package system
 
@@ -30,7 +30,7 @@ import (
 const instances = 3
 
 // binary is built once for the whole package, with the race detector, so the
-// processes under test are checked as §13 requires and not only the harness.
+// processes under test are checked as required and not only the harness.
 var binary string
 
 func TestMain(m *testing.M) {
@@ -102,7 +102,7 @@ func startCluster(t *testing.T) *cluster {
 		c.nodes = append(c.nodes, c.start())
 	}
 	t.Cleanup(c.stopAll)
-	// §13: whatever the scenario did, every wallet must still add up.
+	// whatever the scenario did, every wallet must still add up.
 	t.Cleanup(c.reconcileEveryWallet)
 	return c
 }
@@ -141,7 +141,7 @@ func (c *cluster) start() *instance {
 }
 
 // await blocks until the instance reports itself ready, which is also the proof
-// that it reached PostgreSQL and SQS on its own (§9).
+// that it reached PostgreSQL and SQS on its own.
 func (c *cluster) await(node *instance) {
 	c.t.Helper()
 
@@ -163,7 +163,7 @@ func (c *cluster) await(node *instance) {
 	c.t.Fatalf("an instance never became ready:\n%s", node.output.String())
 }
 
-// kill is §13.5's abrupt termination: no shutdown hook runs, so whatever the
+// kill is the abrupt termination: no shutdown hook runs, so whatever the
 // process was holding is released by its connections dying.
 func (c *cluster) kill(node *instance) {
 	c.t.Helper()
@@ -320,7 +320,7 @@ func (c *cluster) submit(node *instance, o operation) outcome {
 	return outcome{resp.StatusCode, body.TransactionID, body.IdempotentReplay, body.Balance.Amount, body.Code}
 }
 
-// enqueue is the same operation over §10's envelope, so a scenario can cross
+// enqueue is the same operation over the envelope, so a scenario can cross
 // the two transports.
 func (c *cluster) enqueue(messageID string, o operation) {
 	c.t.Helper()
@@ -414,9 +414,9 @@ func (c *cluster) ledgerEntries(walletID string) int {
 	return entries
 }
 
-// reconcileEveryWallet is §13's closing check, run after every scenario: the
+// reconcileEveryWallet is the closing check, run after every scenario: the
 // stored balance of every wallet against the credits minus the debits of its
-// ledger, read through the endpoint that rebuilds it (§9).
+// ledger, read through the endpoint that rebuilds it.
 func (c *cluster) reconcileEveryWallet() {
 	if len(c.nodes) == 0 || c.t.Failed() {
 		return

@@ -54,7 +54,7 @@ func (r *readiness) serve(w http.ResponseWriter, req *http.Request) {
 }
 
 // The reason is logged, not returned: a public probe says which dependency is
-// down, never why (§12).
+// down, never why.
 func (r *readiness) check(ctx context.Context, name string, err error) string {
 	if err != nil {
 		r.logger.WarnContext(ctx, "readiness check failed",

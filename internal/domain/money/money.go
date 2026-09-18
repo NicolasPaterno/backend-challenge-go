@@ -1,5 +1,5 @@
 // Package money holds the exact-precision monetary value object. Amounts are
-// int64 minor units and never touch floating point (§5.1).
+// int64 minor units and never touch floating point.
 package money
 
 import (
@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// Every amount uses a fixed scale of two decimal places (§6.1), so a currency
+// Every amount uses a fixed scale of two decimal places, so a currency
 // whose real minor unit differs — JPY with none, KWD with three — is still
 // stored and rendered with two.
 const (
@@ -24,7 +24,7 @@ const (
 // amountPattern accepts the equivalent spellings of one amount: an optional
 // minus, digits with or without leading zeros, and an optional fraction of one
 // or two digits. "25", "25.0", "025", "025.0" and "025.00" all mean 2500.
-// Excess scale ("25.000") stays rejected — §6.1 requires it — along with "",
+// Excess scale ("25.000") stays rejected — the brief requires it — along with "",
 // "NaN", "Infinity", "1e2", "+25.00", "25." and " 25.00".
 var amountPattern = regexp.MustCompile(`^-?[0-9]+(\.[0-9]{1,2})?$`)
 
@@ -48,16 +48,16 @@ func (e *CurrencyMismatchError) Error() string {
 func (e *CurrencyMismatchError) Is(target error) bool { return target == ErrCurrencyMismatch }
 
 // Money is an immutable amount in the minor units of one currency. Its zero
-// value carries no currency and every operation rejects it (§6).
+// value carries no currency and every operation rejects it.
 type Money struct {
 	minor    int64
 	currency Currency
 }
 
 // Parse reads an amount arriving from outside the system: no negative sign, and
-// a scale of at most two decimal places (§6.1). Equivalent spellings such as
+// a scale of at most two decimal places. Equivalent spellings such as
 // "25" or "25.0" normalise to the same minor units, so the idempotency hash
-// must be taken over those units and never over the received text (§9, A.3.1).
+// must be taken over those units and never over the received text (A.3.1).
 func Parse(amount string, currency Currency) (Money, error) {
 	if err := checkCurrency(currency); err != nil {
 		return Money{}, err
@@ -74,7 +74,7 @@ func Parse(amount string, currency Currency) (Money, error) {
 
 // FromMinor builds a value from minor units already known to be exact: a
 // database column, or a calculation done elsewhere. Unlike Parse it accepts
-// negatives, which differences and reversals need (§6.1).
+// negatives, which differences and reversals need.
 func FromMinor(minor int64, currency Currency) (Money, error) {
 	if err := checkCurrency(currency); err != nil {
 		return Money{}, err
@@ -149,10 +149,10 @@ func (m Money) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON is an external boundary, so it applies Parse's rules: a
-// negative amount is refused here, and only arithmetic can produce one (§6.1).
+// negative amount is refused here, and only arithmetic can produce one.
 func (m *Money) UnmarshalJSON(data []byte) error {
 	// encoding/json asks unmarshalers to treat null as a no-op. A monetary
-	// field is never optional, and §6 requires invalid domain values to be
+	// field is never optional, and the brief requires invalid domain values to be
 	// rejected, so null fails here instead of leaving an invalid value for a
 	// caller to notice later. An absent field never reaches this method at all
 	// and stays the caller's check.
@@ -192,9 +192,9 @@ func parseMinor(amount string) (int64, error) {
 		return 0, fmt.Errorf("%w, got %q", ErrInvalidAmount, amount)
 	}
 
-	// Normalisation (§6.1): pad the fraction to two digits and drop the point,
+	// Normalisation: pad the fraction to two digits and drop the point,
 	// so every spelling of an amount collapses to the same minor units before
-	// anything hashes it (§9). ParseInt ignores leading zeros.
+	// anything hashes it. ParseInt ignores leading zeros.
 	integer, fraction, _ := strings.Cut(amount, ".")
 	digits := integer + fraction + strings.Repeat("0", minorDigits-len(fraction))
 

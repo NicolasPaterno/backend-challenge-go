@@ -94,7 +94,7 @@ func startKeycloak() (string, error) {
 	return endpoint + "/realms/" + KeycloakRealm, nil
 }
 
-// Token runs the client_credentials grant §2 prescribes.
+// Token runs the client_credentials grant the brief prescribes.
 func Token(t *testing.T, issuer, clientID string) string {
 	t.Helper()
 

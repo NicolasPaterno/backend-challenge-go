@@ -85,7 +85,7 @@ func SQSEnv(t *testing.T) (client *awssqs.Client, queueURL string) {
 	}
 
 	// The same redrive policy Compose provisions, so a test sees the attempts
-	// run out the way production would (§10).
+	// run out the way production would.
 	inbound := createFIFO(t, client, fmt.Sprintf("wagers-%d.fifo", unique), map[string]string{
 		"VisibilityTimeout": "2",
 		"RedrivePolicy": fmt.Sprintf(`{"deadLetterTargetArn":%q,"maxReceiveCount":"2"}`,
@@ -133,7 +133,7 @@ func createFIFO(t *testing.T, client *awssqs.Client, name string, attributes map
 	return *created.QueueUrl
 }
 
-// Send puts one message on a FIFO queue, grouped by wallet as §10 specifies.
+// Send puts one message on a FIFO queue, grouped by wallet as the brief specifies.
 func Send(t *testing.T, client *awssqs.Client, queueURL, body, group, dedup string) {
 	t.Helper()
 

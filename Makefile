@@ -19,7 +19,7 @@ test-race:
 test-integration:
 	go test -race -tags=integration ./...
 
-# Three real processes against shared containers (§8, §13.4); slower, so it is
+# Three real processes against shared containers; slower, so it is
 # not part of test-integration.
 test-system:
 	go test -race -tags='integration,system' -timeout 40m ./test/system/...

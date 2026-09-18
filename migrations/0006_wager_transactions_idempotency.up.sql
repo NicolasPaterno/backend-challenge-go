@@ -1,4 +1,4 @@
--- §9: one record per idempotency key within a provider, and one financial
+-- one record per idempotency key within a provider, and one financial
 -- operation per (provider_id, external_transaction_id) whatever key it arrived
 -- under. An INTERNAL row leaves both columns NULL and NULLs never conflict, so
 -- neither index constrains an OPENING.

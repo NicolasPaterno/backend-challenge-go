@@ -23,7 +23,7 @@ const insertOutboxEvent = `
 	INSERT INTO outbox_events (event_id, aggregate_id, event_type, payload, occurred_at)
 	VALUES ($1, $2, $3, $4, $5)`
 
-// Called inside the caller's transaction, never with its own: §5.4 allows a
+// Called inside the caller's transaction, never with its own: the brief allows a
 // publication only after the commit that caused it, which holds because the row
 // cannot exist without that commit.
 func insertOutbox(ctx context.Context, tx pgx.Tx, outbox []events.Envelope) error {
@@ -50,8 +50,8 @@ func NewOutboxStore(pool *pgxpool.Pool) *OutboxStore {
 
 const (
 	// SKIP LOCKED is the claim: a row another publisher holds is invisible here,
-	// so several of them drain the same table without ever meeting on a row
-	// (§11). The lease is the transaction itself — a publisher that dies has its
+	// so several of them drain the same table without ever meeting on a row.
+	// The lease is the transaction itself — a publisher that dies has its
 	// rows released by Postgres at once, with no lease column to expire.
 	claimDueEvents = `
 		SELECT event_id, aggregate_id, payload
@@ -64,7 +64,7 @@ const (
 	markPublished = `UPDATE outbox_events SET published_at = now() WHERE event_id = ANY($1)`
 
 	// Doubling from one second, capped at five minutes, computed with an integer
-	// shift because power() is floating point (§5.1).
+	// shift because power() is floating point.
 	backOff = `
 		UPDATE outbox_events
 		SET attempts = attempts + 1,
@@ -118,7 +118,7 @@ func (s *OutboxStore) Drain(ctx context.Context, limit int, publish func(context
 	return published, sendErr
 }
 
-// §12's outbox lag: the age of the oldest event still waiting. Published as a
+// the outbox lag: the age of the oldest event still waiting. Published as a
 // function rather than kept up to date by the publisher, so it is measured from
 // the table — the one place a stalled or dead publisher still shows up.
 const selectOutboxLag = `

@@ -7,13 +7,11 @@ import (
 )
 
 // PayloadHash is SHA-256 over canonical JSON; a map is used because
-// encoding/json sorts its keys, which is what makes HTTP and SQS agree (§9,
-// §10). The algorithm, fields and normalisations are documented in
-// docs/wagering.md.
+// encoding/json sorts its keys, which is what makes HTTP and SQS agree. The
+// algorithm, fields and normalisations are documented in ARCHITECTURE.md.
 //
 // The inbox identity is excluded with the rest of the transport metadata, so
-// one operation hashes the same whether it arrived over HTTP or on the queue
-// (§10).
+// one operation hashes the same whether it arrived over HTTP or on the queue.
 //
 // Money is hashed as minor units, never as the received text: "25" and "25.00"
 // are one amount after A.3.1, and hashing the text would turn an equivalent

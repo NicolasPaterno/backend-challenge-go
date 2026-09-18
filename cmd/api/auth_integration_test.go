@@ -78,7 +78,7 @@ func TestWalletRoutesAcceptOnlyTheInternalService(t *testing.T) {
 	}
 }
 
-// §13: a refused request must not leak what it was refused access to.
+// a refused request must not leak what it was refused access to.
 func TestUnauthorizedReadExposesNoWalletData(t *testing.T) {
 	t.Setenv("DATABASE_URL", testsupport.PostgresMigrated(t))
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")

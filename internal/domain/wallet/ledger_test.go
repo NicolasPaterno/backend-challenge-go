@@ -89,7 +89,7 @@ func TestNewLedgerEntryRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-// §6.4's immutability is checked rather than reviewed: a reader is one keystroke
+// the immutability is checked rather than reviewed: a reader is one keystroke
 // from being a setter, and nothing else would catch it.
 func TestLedgerEntryHasNoMutatingMethods(t *testing.T) {
 	files, err := parser.ParseDir(token.NewFileSet(), ".", nil, 0)

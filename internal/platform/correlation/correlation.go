@@ -1,5 +1,5 @@
 // Package correlation carries the id that ties one operation's log lines and
-// events together across processes (§12).
+// events together across processes.
 package correlation
 
 import (

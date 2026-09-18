@@ -14,7 +14,7 @@ func onMessage(p SubmitParams, messageID string) SubmitParams {
 	return p
 }
 
-// §10: a redelivery of the same message moves money once. The inbox is what
+// a redelivery of the same message moves money once. The inbox is what
 // stops it before the work is repeated.
 func TestARedeliveredMessageIsHandledOnce(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")
@@ -43,7 +43,7 @@ func TestARedeliveredMessageIsHandledOnce(t *testing.T) {
 	}
 }
 
-// §10: the hash is verified on a redelivery, so one message id carrying
+// the hash is verified on a redelivery, so one message id carrying
 // different content is refused rather than treated as already handled.
 func TestAMessageIDReusedWithOtherContentIsRefused(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")
@@ -63,14 +63,14 @@ func TestAMessageIDReusedWithOtherContentIsRefused(t *testing.T) {
 	}
 }
 
-// §10 requires HTTP and SQS to share the idempotency guarantees, which rests on
+// The brief requires HTTP and SQS to share the idempotency guarantees, which rests on
 // the two paths hashing an operation identically: the inbox identity is
-// transport metadata and must not reach the digest (§9).
+// transport metadata and must not reach the digest.
 func TestTheInboxIdentityIsOutsideTheHash(t *testing.T) {
 	_, _, p := fixture(t, "100.00")
 
 	if PayloadHash(p) != PayloadHash(onMessage(p, "msg-123")) {
-		t.Fatal("the messageId changed the hash; §9 excludes transport metadata")
+		t.Fatal("the messageId changed the hash; the payload hash excludes transport metadata")
 	}
 
 	service, repo, _ := fixture(t, "100.00")
@@ -80,7 +80,7 @@ func TestTheInboxIdentityIsOutsideTheHash(t *testing.T) {
 	if _, err := service.Submit(context.Background(), overHTTP); err != nil {
 		t.Fatalf("HTTP Submit() error = %v", err)
 	}
-	// The same operation arriving on the queue: one financial effect (§10).
+	// The same operation arriving on the queue: one financial effect.
 	replay, err := service.Submit(context.Background(), onMessage(overHTTP, "msg-123"))
 	if err != nil {
 		t.Fatalf("SQS Submit() error = %v", err)
@@ -93,7 +93,7 @@ func TestTheInboxIdentityIsOutsideTheHash(t *testing.T) {
 	}
 }
 
-// §6.3: OPENING is refused whatever transport carries it.
+// OPENING is refused whatever transport carries it.
 func TestOpeningIsRefusedOnTheQueueToo(t *testing.T) {
 	service, _, p := fixture(t, "100.00")
 	p.Kind = wagering.KindOpening

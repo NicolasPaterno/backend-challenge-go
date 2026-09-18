@@ -28,19 +28,19 @@ const (
 	receiveWaitTime = 20
 )
 
-// Submitter is the one use case both transports share (§10), so an operation
+// Submitter is the one use case both transports share, so an operation
 // that arrives on the queue gets the guarantees the HTTP one gets.
 type Submitter interface {
 	Submit(ctx context.Context, p wageringapp.SubmitParams) (wageringapp.Result, error)
 }
 
-// envelope is §10's message shape. Money is decoded by the domain type, so a
+// envelope is the message shape. Money is decoded by the domain type, so a
 // malformed amount is refused at the same boundary as over HTTP (A.3.5).
 type envelope struct {
 	MessageID string `json:"messageId"`
 	Type      string `json:"type"`
 	// Optional: a producer that traces its own call can hand us its id, and
-	// otherwise one is generated (§12).
+	// otherwise one is generated.
 	CorrelationID string `json:"correlationId"`
 	Data          struct {
 		ProviderID                     string      `json:"providerId"`
@@ -78,7 +78,7 @@ func NewConsumer(lc fx.Lifecycle, client *awssqs.Client, submit Submitter, cfg c
 		done:     make(chan struct{}),
 	}
 
-	// Two contexts, because §10 asks for two things on SIGTERM. Cancelling
+	// Two contexts, because the brief asks for two things on SIGTERM. Cancelling
 	// fetchCtx stops the long poll at once; workCtx keeps the handling in flight
 	// alive until the shutdown deadline, and cancelling it releases the
 	// message's visibility for redelivery instead of half-finishing it.
@@ -97,7 +97,7 @@ func NewConsumer(lc fx.Lifecycle, client *awssqs.Client, submit Submitter, cfg c
 
 			// Bounded by the worker's own share, not by the whole shutdown: the
 			// hooks after this one — the HTTP server, the pool — have their own
-			// in-flight work to finish (§4).
+			// in-flight work to finish.
 			drain, giveUp := context.WithTimeout(ctx, cfg.WorkerDrainTimeout)
 			defer giveUp()
 
@@ -158,7 +158,7 @@ func (c *Consumer) receive(ctx context.Context) ([]types.Message, error) {
 	return out.Messages, nil
 }
 
-// handle applies §10's three outcomes. The message is deleted only after its
+// handle applies the three outcomes. The message is deleted only after its
 // handling has committed; a permanent error goes to the dead-letter queue at
 // once; a transient one is left for the visibility timeout to redeliver, and
 // the redrive policy catches it if the attempts run out.
@@ -170,7 +170,7 @@ func (c *Consumer) handle(ctx context.Context, m types.Message) {
 	ctx, _ = correlation.Ensure(ctx, correlationID)
 	if err != nil {
 		// Nothing about this body will parse on the fourth attempt either, and
-		// there is no transaction to reject: it is an invalid message (04 §10).
+		// there is no transaction to reject: it is an invalid message.
 		c.deadLetter(ctx, m, sqsID, "message is not a valid operation", err)
 		return
 	}
@@ -190,8 +190,7 @@ func (c *Consumer) handle(ctx context.Context, m types.Message) {
 	}
 
 	// A rejection is a confirmed outcome and a pending reference is durably
-	// recorded, so both are done with the queue: 13's worker owns what is left
-	// (§6.5, §10).
+	// recorded, so both are done with the queue: 13's worker owns what is left.
 	logger.InfoContext(ctx, "message handled",
 		slog.String("transactionId", result.Transaction.ID().String()),
 		slog.String("walletId", result.Transaction.WalletID().String()),
@@ -203,7 +202,7 @@ func (c *Consumer) handle(ctx context.Context, m types.Message) {
 
 // permanent reports the errors no redelivery can change: a request the domain
 // refuses outright, and a message whose identity collides with content that was
-// already handled (§10).
+// already handled.
 func permanent(err error) bool {
 	return wagering.IsRefusal(err) ||
 		errors.Is(err, wageringapp.ErrUnsupportedKind) ||
@@ -214,7 +213,7 @@ func permanent(err error) bool {
 
 // deadLetter moves a message the consumer can never handle off the queue
 // itself, rather than letting it hold up its message group for
-// maxReceiveCount × VisibilityTimeout on retries that cannot succeed (§10).
+// maxReceiveCount × VisibilityTimeout on retries that cannot succeed.
 // The redrive policy stays as the backstop for everything else.
 func (c *Consumer) deadLetter(ctx context.Context, m types.Message, id, reason string, cause error) {
 	logger := c.logger.With(slog.String("messageId", id), slog.Any("error", cause))
@@ -251,7 +250,7 @@ func (c *Consumer) delete(ctx context.Context, m types.Message, logger *slog.Log
 }
 
 // decode refuses what NewExternal could not have accepted anyway, so a message
-// missing a field never becomes a transaction there is no way to reject (04 §10).
+// missing a field never becomes a transaction there is no way to reject.
 func decode(m types.Message) (wageringapp.SubmitParams, string, error) {
 	var e envelope
 	if err := json.Unmarshal([]byte(derefString(m.Body)), &e); err != nil {

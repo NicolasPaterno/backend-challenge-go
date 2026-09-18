@@ -85,10 +85,10 @@ func TestOpenWithZeroBalanceWritesOnlyTheWallet(t *testing.T) {
 	}
 
 	if got := count(t, pool, `SELECT count(*) FROM wager_transactions WHERE wallet_id = $1`, opened.ID()); got != 0 {
-		t.Errorf("transactions = %d, want 0 (§9)", got)
+		t.Errorf("transactions = %d, want 0", got)
 	}
 	if got := count(t, pool, `SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id = $1`, opened.ID()); got != 0 {
-		t.Errorf("ledger entries = %d, want 0 (§9)", got)
+		t.Errorf("ledger entries = %d, want 0", got)
 	}
 }
 
@@ -143,28 +143,28 @@ func TestSchemaEnforcesTheFinancialInvariants(t *testing.T) {
 			 VALUES ($1, 'INTERNAL', 'OPENING', 'PROCESSED', $2, $3, 'BRL', 500, now(), now())`,
 			[]any{uuid.NewV7(), opened.ID(), opened.PlayerID()},
 		},
-		{ // §6.4
+		{
 			"a second entry for the same (wallet, transaction)",
 			`INSERT INTO wallet_ledger_entries (id, wallet_id, transaction_id, direction, currency, amount_minor, balance_before_minor, balance_after_minor, created_at)
 			 VALUES ($1, $2, $3, 'CREDIT', 'BRL', 100, 1000, 1100, now())`,
 			[]any{uuid.NewV7(), opened.ID(), openingID},
 		},
-		{ // §5.5
+		{
 			"editing a ledger entry",
 			`UPDATE wallet_ledger_entries SET amount_minor = 1 WHERE wallet_id = $1`,
 			[]any{opened.ID()},
 		},
-		{ // §5.5
+		{
 			"deleting a ledger entry",
 			`DELETE FROM wallet_ledger_entries WHERE wallet_id = $1`,
 			[]any{opened.ID()},
 		},
-		{ // §5.8
+		{
 			"a negative balance",
 			`UPDATE wallets SET balance_minor = -1 WHERE id = $1`,
 			[]any{opened.ID()},
 		},
-		{ // §6.4: balanceAfter must match balanceBefore ± amount
+		{ // balanceAfter must match balanceBefore ± amount
 			"an entry whose arithmetic does not hold",
 			`INSERT INTO wallet_ledger_entries (id, wallet_id, transaction_id, direction, currency, amount_minor, balance_before_minor, balance_after_minor, created_at)
 			 VALUES ($1, $2, $3, 'CREDIT', 'BRL', 100, 1000, 9999, now())`,
@@ -196,7 +196,7 @@ func TestSchemaEnforcesTheFinancialInvariants(t *testing.T) {
 func TestDistinctWalletsOpenInParallel(t *testing.T) {
 	service, _ := newService(t)
 
-	// §5.6: no global lock, so independent wallets never wait on each other.
+	// no global lock, so independent wallets never wait on each other.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

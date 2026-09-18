@@ -30,7 +30,7 @@ type reconciliationResponse struct {
 	CheckedEntries    int         `json:"checkedEntries"`
 }
 
-// POST, as §9 names it, though it changes nothing: the wallet and its ledger
+// POST, as the brief names it, though it changes nothing: the wallet and its ledger
 // are only read.
 func (h *WalletHandler) reconcile(w http.ResponseWriter, r *http.Request) {
 	walletID, err := uuid.Parse(r.PathValue("walletId"))
@@ -50,7 +50,7 @@ func (h *WalletHandler) reconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// §12 wants a divergence visible without reading the response that found it.
+	// The brief wants a divergence visible without reading the response that found it.
 	if !report.Consistent {
 		metrics.ReconciliationDivergences.Add(1)
 		h.logger.ErrorContext(r.Context(), "wallet balance diverges from its ledger",

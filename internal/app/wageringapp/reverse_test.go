@@ -44,13 +44,13 @@ func TestRefundReturnsTheDebitOfItsBet(t *testing.T) {
 	if got := repo.wallet.Balance().String(); got != "100.00 BRL" {
 		t.Errorf("balance = %s, want the 100.00 BRL the bet started from", got)
 	}
-	// §5.5: the debit stays and the return is a second entry, never an edit.
+	// the debit stays and the return is a second entry, never an edit.
 	if len(repo.entries) != 2 {
 		t.Errorf("ledger entries = %d, want 2", len(repo.entries))
 	}
 }
 
-// §7: a ROLLBACK applies the movement opposite to the one it undoes.
+// a ROLLBACK applies the movement opposite to the one it undoes.
 func TestRollbackAppliesTheOppositeMovement(t *testing.T) {
 	tests := map[string]struct {
 		kind wagering.Kind
@@ -111,7 +111,7 @@ func TestOneSuccessfulReversalSpendsTheReference(t *testing.T) {
 	}
 }
 
-// A ROLLBACK of the REFUND is how §7 undoes a refund, and it is not blocked by
+// A ROLLBACK of the REFUND is how the brief undoes a refund, and it is not blocked by
 // the rule above: the REFUND is a reference of its own.
 func TestARefundIsUndoneByRollingItBack(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")
@@ -127,7 +127,7 @@ func TestARefundIsUndoneByRollingItBack(t *testing.T) {
 	}
 }
 
-// §7's agreement rules and the reversal table, each broken one field at a time.
+// the agreement rules and the reversal table, each broken one field at a time.
 func TestReversalRefusesAReferenceItDoesNotMatch(t *testing.T) {
 	tests := map[string]struct {
 		referenceKind wagering.Kind
@@ -141,7 +141,7 @@ func TestReversalRefusesAReferenceItDoesNotMatch(t *testing.T) {
 			func(_ *testing.T, p *SubmitParams) { p.WalletID = p.PlayerID }, wagering.FailureWalletNotFound},
 		"a different amount": {wagering.KindBet, wagering.KindRefund,
 			func(t *testing.T, p *SubmitParams) { p.Money = brl(t, "10.00") }, wagering.FailureReferenceAmount},
-		// §7 makes a WIN a rollback target, never a refund target.
+		// The brief makes a WIN a rollback target, never a refund target.
 		"a refund of a win": {wagering.KindWin, wagering.KindRefund,
 			func(*testing.T, *SubmitParams) {}, wagering.FailureReferenceMismatch},
 		// A LOSS moved nothing, so there is nothing to undo.
@@ -177,7 +177,7 @@ func TestReversalRefusesAReferenceItDoesNotMatch(t *testing.T) {
 	}
 }
 
-// §7: a reversal that cannot be covered is rejected with a code of its own, so
+// a reversal that cannot be covered is rejected with a code of its own, so
 // an incident is not read as a routine bet without funds.
 func TestAReversalThatOverdrawsIsRejectedWithItsOwnCode(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")
@@ -230,7 +230,7 @@ func TestAReversalOfANonProcessedReferenceIsRejectedAtOnce(t *testing.T) {
 }
 
 // A.8.2: absent and not-yet-finished are the same case — the reference is not
-// available, and §7 waits for it. 13 adds the worker that retries and expires.
+// available, and the brief waits for it. 13 adds the worker that retries and expires.
 func TestAReversalWaitsForAReferenceThatHasNotArrived(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")
 

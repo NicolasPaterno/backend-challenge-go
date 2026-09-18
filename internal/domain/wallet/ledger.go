@@ -27,7 +27,7 @@ func (d Direction) IsValid() bool { return d == DirectionDebit || d == Direction
 
 func (d Direction) String() string { return string(d) }
 
-// LedgerEntry is immutable: a correction is a new entry, never an edit (§5.5).
+// LedgerEntry is immutable: a correction is a new entry, never an edit.
 type LedgerEntry struct {
 	id            uuid.UUID
 	walletID      uuid.UUID
@@ -64,7 +64,7 @@ func NewLedgerEntry(id, walletID, transactionID uuid.UUID, direction Direction, 
 	if amount.IsNegative() {
 		return nil, fmt.Errorf("%w: entry amount %s", money.ErrNegativeAmount, amount)
 	}
-	// §6.4: a movement of nothing produces no entry.
+	// a movement of nothing produces no entry.
 	if amount.IsZero() {
 		return nil, ErrEmptyMovement
 	}

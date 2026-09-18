@@ -11,7 +11,7 @@ import (
 	"uuid"
 )
 
-// §3 and §13.7: the reversal overtakes the operation it undoes. It waits, and
+// the reversal overtakes the operation it undoes. It waits, and
 // the worker applies it once the bet lands — under 12's full rules.
 func TestAReversalDeliveredBeforeItsReferenceResolvesLater(t *testing.T) {
 	api := startWagering(t)
@@ -46,13 +46,13 @@ func TestAReversalDeliveredBeforeItsReferenceResolvesLater(t *testing.T) {
 	if got := api.debits(walletID); got != 1 {
 		t.Errorf("ledger debits = %d, want the bet's alone", got)
 	}
-	// §5.5: the return is an entry of its own, on top of the opening and the bet.
+	// the return is an entry of its own, on top of the opening and the bet.
 	if got := api.ledger(walletID); len(got) != 3 {
 		t.Errorf("ledger = %v, want three entries", got)
 	}
 }
 
-// §7: the wait is bounded by REFERENCE_TTL; on expiry the reversal is REJECTED
+// the wait is bounded by REFERENCE_TTL; on expiry the reversal is REJECTED
 // with the reference-not-found code and the rejection event it owes.
 func TestAWaitExpiresIntoAReferenceNotFoundRejection(t *testing.T) {
 	t.Setenv("REFERENCE_TTL", "1s")
@@ -82,7 +82,7 @@ func TestAWaitExpiresIntoAReferenceNotFoundRejection(t *testing.T) {
 	}
 }
 
-// §7 and §13.8: the wait lives in PostgreSQL, not in the process, so another
+// the wait lives in PostgreSQL, not in the process, so another
 // instance picks it up after a restart.
 func TestAWaitSurvivesARestartAndIsResumedByAnotherInstance(t *testing.T) {
 	api := startWagering(t)
@@ -101,7 +101,7 @@ func TestAWaitSurvivesARestartAndIsResumedByAnotherInstance(t *testing.T) {
 	api.stop()
 
 	// A second instance, with its own connections and memory, against the same
-	// database (§8).
+	// database.
 	var server *http.Server
 	second := fxtest.New(t, options(), fx.Populate(&server))
 	second.RequireStart()

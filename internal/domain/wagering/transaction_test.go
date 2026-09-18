@@ -117,7 +117,7 @@ func TestNewExternalRejectsUnknownKind(t *testing.T) {
 	}
 }
 
-// §7's amount policy per kind. The LOSS cases cover "0", "0.0" and "0.00":
+// the amount policy per kind. The LOSS cases cover "0", "0.0" and "0.00":
 // A.3.1 normalises all three to zero minor units, so the rule is IsZero and not
 // a comparison against the literal "0.00".
 func TestAmountPolicyPerKind(t *testing.T) {
@@ -192,7 +192,7 @@ func TestNewInternalOpeningCarriesNoExternalMetadata(t *testing.T) {
 	}
 }
 
-// §7 accepts zero as an initial balance; the use case (05) is what skips the
+// The brief accepts zero as an initial balance; the use case (05) is what skips the
 // OPENING in that case, so the domain must not refuse it.
 func TestNewInternalOpeningAcceptsZero(t *testing.T) {
 	zero, err := money.Zero(money.BRL)
@@ -224,7 +224,7 @@ func TestNewInternalOpeningRejectsUninitialisedValues(t *testing.T) {
 }
 
 // The full matrix: every start state against every target, so a forbidden edge
-// cannot be added by accident (§6.3).
+// cannot be added by accident.
 func TestTransitionMatrix(t *testing.T) {
 	// PENDING is only a start state: no method targets it, so it is not in
 	// the target list. TestPendingIsUnreachable covers that separately.
@@ -284,7 +284,7 @@ func TestTransitionMatrix(t *testing.T) {
 
 // Nothing returns a transaction to PENDING: the constructors are the only code
 // that sets it, so a resumed PENDING row is the one the interrupted instance
-// committed (§6.3).
+// committed.
 func TestPendingIsUnreachable(t *testing.T) {
 	for _, status := range []wagering.Status{wagering.StatusPendingReference, wagering.StatusProcessed, wagering.StatusRejected, wagering.StatusFailed} {
 		tx := rehydrated(t, status)
@@ -381,8 +381,8 @@ func TestRejectRefusesACodeOutsideTheCatalogue(t *testing.T) {
 	}
 }
 
-// §7 requires a reversal that overdraws to be told apart from a bet that
-// overdraws, and both to be distinguishable from correctable input (03 §7).
+// The brief requires a reversal that overdraws to be told apart from a bet that
+// overdraws, and both to be distinguishable from correctable input.
 func TestFailureCodeClassification(t *testing.T) {
 	if wagering.FailureInsufficientFunds == wagering.FailureReversalExceedsBalance {
 		t.Fatal("the bet and reversal overdraw codes are the same string")
@@ -416,7 +416,7 @@ func TestFailureCodeClassification(t *testing.T) {
 	}
 }
 
-// §7: a reversal must cite what it undoes, a WIN "may cite a bet from the same
+// a reversal must cite what it undoes, a WIN "may cite a bet from the same
 // round", and a BET or LOSS carrying one is a malformed request.
 func TestReferencePolicyPerKind(t *testing.T) {
 	cases := []struct {
@@ -452,7 +452,7 @@ func TestReferencePolicyPerKind(t *testing.T) {
 	}
 }
 
-// §9: a rejection still reports a balance, and a replay must return that one.
+// a rejection still reports a balance, and a replay must return that one.
 // It is optional because a rejection for an unknown wallet has none to observe.
 func TestRejectRecordsTheReportedBalance(t *testing.T) {
 	tx := newExternal(t, wagering.KindBet, "25.00")
@@ -486,7 +486,7 @@ func TestRejectRecordsTheReportedBalance(t *testing.T) {
 }
 
 // Rehydration restores the stored outcome without re-running the kind rules: a
-// row whose amount would now be refused still loads (§6).
+// row whose amount would now be refused still loads.
 func TestRehydrateReplaysNothing(t *testing.T) {
 	stored := rehydrateParams(t, wagering.StatusProcessed)
 	stored.Kind = wagering.KindLoss
@@ -583,7 +583,7 @@ func move(t *testing.T, tx *wagering.WagerTransaction, to wagering.Status) error
 	}
 }
 
-// §7 bounds the wait, so a record cannot enter PENDING_REFERENCE without the
+// The brief bounds the wait, so a record cannot enter PENDING_REFERENCE without the
 // deadline it will be judged against.
 func TestMarkPendingReferenceRequiresAFutureDeadline(t *testing.T) {
 	for name, deadline := range map[string]time.Time{

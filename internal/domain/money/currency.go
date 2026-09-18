@@ -16,7 +16,7 @@ const (
 // supported is the one place a currency is added or removed.
 //
 // ponytail: a set, not a metadata table, because every entry here has two
-// decimal places and §6.1 fixes the external contract at that scale. A currency
+// decimal places and the brief fixes the external contract at that scale. A currency
 // with a different exponent — JPY with none, KWD with three — is not a row in
 // this map: it needs a scale per currency in parseMinor and format. At that
 // point this becomes map[Currency]int holding exponents and the callers read

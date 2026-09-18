@@ -1,5 +1,5 @@
 // Package domain has no code of its own: this test guards every package under
-// internal/. §5.1 forbids money touching a float anywhere, and §14 lists that
+// internal/. The brief forbids money touching a float anywhere, and the brief lists that
 // as disqualifying, so the check runs under plain `go test` rather than a lint
 // target someone has to remember.
 //

@@ -1,5 +1,5 @@
 // Package walletapp holds the wallet use cases and declares the ports the
-// adapters satisfy (§4).
+// adapters satisfy.
 package walletapp
 
 import (
@@ -22,7 +22,7 @@ var (
 	ErrNotFound      = errors.New("walletapp: wallet not found")
 )
 
-// Open takes the whole aggregate rather than a transaction handle: §9 requires
+// Open takes the whole aggregate rather than a transaction handle: the brief requires
 // the wallet, its OPENING, the credit entry and the outbox records to share one
 // commit, and a single method makes a partial write unrepresentable.
 type Repository interface {
@@ -31,7 +31,7 @@ type Repository interface {
 	Ledger(ctx context.Context, walletID uuid.UUID, after *LedgerCursor, limit int) ([]*wallet.LedgerEntry, error)
 	// Reconcile reads the stored balance and the one rebuilt from the ledger in
 	// a single consistent view, so a concurrent movement cannot show up as a
-	// divergence (§9).
+	// divergence.
 	Reconcile(ctx context.Context, walletID uuid.UUID) (stored, calculated money.Money, entries int, err error)
 }
 
@@ -68,7 +68,7 @@ func (s *Service) Open(ctx context.Context, p OpenParams) (*wallet.Wallet, error
 		return nil, err
 	}
 
-	// §9: a zero opening credits nothing, so there is no OPENING, no entry and
+	// a zero opening credits nothing, so there is no OPENING, no entry and
 	// none of the financial events.
 	if p.InitialBalance.IsZero() {
 		if err := s.repo.Open(ctx, w, nil, nil, nil); err != nil {
@@ -111,7 +111,7 @@ func (s *Service) Open(ctx context.Context, p OpenParams) (*wallet.Wallet, error
 	return w, nil
 }
 
-// The opening credit is recorded, not applied: §9 pins the wallet's version at
+// The opening credit is recorded, not applied: the brief pins the wallet's version at
 // 1 and wallet.New already carries the initial balance, so Credit here would
 // move the balance twice. It is the one call to NewLedgerEntry outside
 // rehydration; every later movement goes through Debit/Credit.

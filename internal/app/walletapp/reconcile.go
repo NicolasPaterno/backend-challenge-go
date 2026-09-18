@@ -8,7 +8,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/money"
 )
 
-// Reconciliation is §9's report: the stored balance against the one rebuilt
+// Reconciliation is the report: the stored balance against the one rebuilt
 // from the ledger, and the difference between them. Nothing here writes.
 type Reconciliation struct {
 	WalletID       uuid.UUID
@@ -25,7 +25,7 @@ func (s *Service) Reconcile(ctx context.Context, walletID uuid.UUID) (Reconcilia
 		return Reconciliation{}, err
 	}
 
-	// §9: stored minus rebuilt, so a shortfall reads negative.
+	// stored minus rebuilt, so a shortfall reads negative.
 	difference, err := stored.Sub(calculated)
 	if err != nil {
 		return Reconciliation{}, err

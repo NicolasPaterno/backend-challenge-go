@@ -16,7 +16,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/testsupport"
 )
 
-// The whole path §11 asks for: the opening commits its events, the worker
+// The whole path the brief asks for: the opening commits its events, the worker
 // drains them, and they arrive on the queue after — never before — that commit.
 func TestOpeningEventsReachTheQueue(t *testing.T) {
 	t.Setenv("DATABASE_URL", testsupport.PostgresMigrated(t))

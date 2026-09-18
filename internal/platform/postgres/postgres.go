@@ -21,7 +21,7 @@ func NewPool(lc fx.Lifecycle, cfg config.Config, logger *slog.Logger) (*pgxpool.
 	poolCfg.MaxConns = cfg.DBMaxConns
 	poolCfg.MinConns = cfg.DBMinConns
 
-	// A wallet under contention queues on its row lock (§8). Without a bound,
+	// A wallet under contention queues on its row lock. Without a bound,
 	// that queue is only ever cut short by the caller giving up, holding a pool
 	// connection the whole time; with one, the wallet answers 503 and the
 	// provider retries. It is deliberately longer than a transaction on an

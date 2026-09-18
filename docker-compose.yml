@@ -98,7 +98,7 @@ services:
       REFERENCE_BATCH_SIZE: ${REFERENCE_BATCH_SIZE:-100}
       REFERENCE_TTL: ${REFERENCE_TTL:-24h}
     # A range rather than one port, so `docker compose up --scale api=3` runs
-    # three independent instances on 8080, 8081 and 8082 (§8, §13.4).
+    # three independent instances on 8080, 8081 and 8082.
     ports:
       - "127.0.0.1:8080-8082:8080"
     depends_on:
@@ -116,7 +116,7 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
-    # SHUTDOWN_TIMEOUT plus slack, before Compose escalates to SIGKILL (§4).
+    # SHUTDOWN_TIMEOUT plus slack, before Compose escalates to SIGKILL.
     stop_grace_period: 20s
 
 volumes:

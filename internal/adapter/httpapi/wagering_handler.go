@@ -17,7 +17,7 @@ import (
 )
 
 // Mandatory, and stored as received: {providerId}:{externalTransactionId} is a
-// convention of the client, never a value this API recomputes (§9).
+// convention of the client, never a value this API recomputes.
 const idempotencyKeyHeader = "Idempotency-Key"
 
 type WageringHandler struct {
@@ -73,7 +73,7 @@ func (h *WageringHandler) submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Before any validation is reported, so a caller cannot probe another
-	// provider's contract (§2).
+	// provider's contract.
 	identity, _ := auth.FromContext(r.Context())
 	if body.ProviderID != "" && body.ProviderID != identity.ProviderID {
 		writeProblem(w, http.StatusForbidden, CodeForbidden,
@@ -90,7 +90,7 @@ func (h *WageringHandler) submit(w http.ResponseWriter, r *http.Request) {
 	result, err := h.wagering.Submit(r.Context(), params)
 	switch {
 	case err == nil:
-		// The identifiers §12 asks for; the amounts stay out of the log.
+		// The identifiers the brief asks for; the amounts stay out of the log.
 		h.logger.InfoContext(r.Context(), "wager transaction handled",
 			slog.String("providerId", params.ProviderID),
 			slog.String("walletId", params.WalletID.String()),
@@ -114,7 +114,7 @@ func (h *WageringHandler) submit(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// §9's outcome matrix, tabulated in docs/wagering.md. Only 13's pending
+// the outcome matrix, tabulated in ARCHITECTURE.md. Only 13's pending
 // references reach 202.
 func (h *WageringHandler) writeOutcome(w http.ResponseWriter, result wageringapp.Result) {
 	t := result.Transaction
@@ -257,7 +257,7 @@ func (h *WageringHandler) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Another provider's transaction is reported as missing, not as forbidden:
-	// a 403 here would confirm the id exists (§2, §13).
+	// a 403 here would confirm the id exists.
 	identity, _ := auth.FromContext(r.Context())
 	if found.ProviderID() != identity.ProviderID {
 		writeProblem(w, http.StatusNotFound, CodeTransactionNotFound, "transaction not found")

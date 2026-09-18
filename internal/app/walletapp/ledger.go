@@ -10,7 +10,7 @@ import (
 )
 
 // LedgerCursor is the sort key of a page's last entry. Paging by it rather than
-// by offset is what keeps a concurrent insert from shifting a boundary (§9).
+// by offset is what keeps a concurrent insert from shifting a boundary.
 type LedgerCursor struct {
 	CreatedAt time.Time
 	ID        uuid.UUID

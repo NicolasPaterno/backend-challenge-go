@@ -1,5 +1,5 @@
 // Package config loads and validates the process configuration from the
-// environment, failing startup before any dependency is constructed (§4).
+// environment, failing startup before any dependency is constructed.
 package config
 
 import (
@@ -78,10 +78,10 @@ func Load() (Config, error) {
 	cfg.OIDCDiscoveryURL = envOr("OIDC_DISCOVERY_URL", cfg.OIDCIssuerURL)
 
 	cfg.AWSRegion = envOr("AWS_REGION", "us-east-1")
-	// LocalStack's address; empty means the real service (§4).
+	// LocalStack's address; empty means the real service.
 	cfg.SQSEndpoint = os.Getenv("SQS_ENDPOINT")
 
-	// §10 names all three: the inbound queue, its dead-letter queue — which the
+	// The brief names all three: the inbound queue, its dead-letter queue — which the
 	// consumer sends permanent failures to directly — and the outbound one.
 	for _, required := range []struct {
 		key  string
@@ -111,7 +111,7 @@ func Load() (Config, error) {
 	cfg.StartupTimeout, startupErr = durationEnv("STARTUP_TIMEOUT", 15*time.Second)
 	// Each worker's own share of the shutdown, so one draining slowly cannot
 	// spend SHUTDOWN_TIMEOUT and leave the HTTP server no time to finish its
-	// own in-flight work (§4). The effective wait is the smaller of this and
+	// own in-flight work. The effective wait is the smaller of this and
 	// whatever the shutdown has left, so a value above SHUTDOWN_TIMEOUT simply
 	// has no effect.
 	var drainErr error
@@ -126,7 +126,7 @@ func Load() (Config, error) {
 	var pollErr, windowErr error
 	cfg.OutboxPollInterval, pollErr = durationEnv("OUTBOX_POLL_INTERVAL", time.Second)
 	// Bounds one publish cycle, and with it how long a claimed row stays locked
-	// by a publisher that hangs instead of dying (§11).
+	// by a publisher that hangs instead of dying.
 	cfg.OutboxPublishWindow, windowErr = durationEnv("OUTBOX_PUBLISH_WINDOW", 10*time.Second)
 	errs = append(errs, pollErr, windowErr)
 
@@ -136,7 +136,7 @@ func Load() (Config, error) {
 
 	var referencePollErr, ttlErr error
 	cfg.ReferencePollInterval, referencePollErr = durationEnv("REFERENCE_POLL_INTERVAL", time.Second)
-	// §7 asks for a maximum attempt count or a TTL; this is the TTL, measured
+	// The brief asks for a maximum attempt count or a TTL; this is the TTL, measured
 	// from the operation's created_at. On expiry the reversal is REJECTED with
 	// REFERENCE_NOT_FOUND.
 	cfg.ReferenceTTL, ttlErr = durationEnv("REFERENCE_TTL", 24*time.Hour)

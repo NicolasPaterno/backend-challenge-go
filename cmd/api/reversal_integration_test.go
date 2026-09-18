@@ -12,7 +12,7 @@ import (
 	"uuid"
 )
 
-// reversals walks §7's two reversal kinds over a wallet that opens at 100.00
+// reversals walks the two reversal kinds over a wallet that opens at 100.00
 // and bets 25.00, so every case below starts from a 75.00 balance.
 type reversals struct {
 	*wagering
@@ -55,7 +55,7 @@ func TestRefundReturnsTheBetAndAppendsToTheLedger(t *testing.T) {
 		t.Errorf("balance = %s, want 100.00", refunded.Balance)
 	}
 
-	// §5.5: the debit is never edited away; the return is its own entry.
+	// the debit is never edited away; the return is its own entry.
 	if got := api.ledger(api.walletID); len(got) != 3 {
 		t.Errorf("ledger = %v, want the opening, the debit and the refund's credit", got)
 	}
@@ -64,7 +64,7 @@ func TestRefundReturnsTheBetAndAppendsToTheLedger(t *testing.T) {
 	}
 }
 
-// §7: a ROLLBACK applies the movement opposite to the one it undoes.
+// a ROLLBACK applies the movement opposite to the one it undoes.
 func TestRollbackUndoesEachOfItsTargets(t *testing.T) {
 	tests := map[string]struct {
 		target bet
@@ -127,7 +127,7 @@ func TestASecondReversalOfOneBetIsRefused(t *testing.T) {
 	}
 }
 
-// §7 lists REFUND as a rollback target, which is how a refund is undone
+// The brief lists REFUND as a rollback target, which is how a refund is undone
 // without a second reversal of the bet (A.8.1).
 func TestARefundIsUndoneByRollingTheRefundBack(t *testing.T) {
 	api := startReversals(t)
@@ -142,7 +142,7 @@ func TestARefundIsUndoneByRollingTheRefundBack(t *testing.T) {
 	}
 }
 
-// §5.8: the rule is in the schema too, not only in the use case. Promoting the
+// the rule is in the schema too, not only in the use case. Promoting the
 // refused reversal by hand is the shortest way to reach the index without the
 // application's own check in front of it.
 func TestTheSchemaRefusesASecondSuccessfulReversal(t *testing.T) {
@@ -164,7 +164,7 @@ func TestTheSchemaRefusesASecondSuccessfulReversal(t *testing.T) {
 	}
 }
 
-// §7's agreement and amount rules, and the codes that tell them apart.
+// the agreement and amount rules, and the codes that tell them apart.
 func TestAReversalThatDoesNotMatchItsReferenceIsRejected(t *testing.T) {
 	tests := map[string]struct {
 		reversal bet
@@ -203,7 +203,7 @@ func TestAReversalThatDoesNotMatchItsReferenceIsRejected(t *testing.T) {
 	}
 }
 
-// §7: a reversal that cannot be covered gets a code of its own, so it is not
+// a reversal that cannot be covered gets a code of its own, so it is not
 // filed as a routine bet without funds.
 func TestAReversalThatOverdrawsIsRejectedWithItsOwnCode(t *testing.T) {
 	api := startReversals(t)
@@ -215,7 +215,7 @@ func TestAReversalThatOverdrawsIsRejectedWithItsOwnCode(t *testing.T) {
 		t.Fatalf("status = %d, want %d (%+v)", undone.Status, http.StatusUnprocessableEntity, undone)
 	}
 	if undone.Code != "REVERSAL_EXCEEDS_BALANCE" {
-		t.Errorf("code = %q, want REVERSAL_EXCEEDS_BALANCE, which §7 keeps distinct from INSUFFICIENT_FUNDS", undone.Code)
+		t.Errorf("code = %q, want REVERSAL_EXCEEDS_BALANCE, which must stay distinct from INSUFFICIENT_FUNDS", undone.Code)
 	}
 	if balance, _ := api.wallet(api.walletID); balance != "15.00" {
 		t.Errorf("balance = %s, want the untouched 15.00", balance)
@@ -248,7 +248,7 @@ func TestAReversalOfARejectedReferenceIsRejectedAtOnce(t *testing.T) {
 
 // A REFUND and a ROLLBACK racing for one bet. Exactly one returns the debit and
 // the other is a business rejection naming its reason — never a 409, which is
-// what the whole-table unique-violation mapping used to turn this into (§9:
+// what the whole-table unique-violation mapping used to turn this into (the brief:
 // these situations must be distinguishable from the contract alone).
 func TestTwoReversalsRacingForOneBetReturnItOnce(t *testing.T) {
 	api := startReversals(t)

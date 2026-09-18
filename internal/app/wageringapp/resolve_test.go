@@ -9,7 +9,7 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/domain/wagering"
 )
 
-// §7: the reversal that arrived first waits, and is applied when its reference
+// the reversal that arrived first waits, and is applied when its reference
 // turns up — exactly once, under the full rules of 12.
 func TestAWaitingReversalIsAppliedWhenItsReferenceArrives(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")
@@ -54,7 +54,7 @@ func TestAWaitingReversalIsAppliedWhenItsReferenceArrives(t *testing.T) {
 	}
 }
 
-// §7: the wait is bounded. On expiry the reversal ends REJECTED with the
+// the wait is bounded. On expiry the reversal ends REJECTED with the
 // reference-not-found code and owes a rejection event.
 func TestAWaitThatOutlivesTheTTLIsRejected(t *testing.T) {
 	service, repo, p := fixture(t, "100.00")

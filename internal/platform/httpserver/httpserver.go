@@ -45,7 +45,7 @@ func NewServeMux(routes []Route) (*http.ServeMux, error) {
 }
 
 // CorrelationHeader is both directions: the id a caller sends is adopted, and
-// the one in use is echoed so the caller can quote it (§12).
+// the one in use is echoed so the caller can quote it.
 const CorrelationHeader = "X-Correlation-Id"
 
 func correlated(next http.Handler) http.Handler {

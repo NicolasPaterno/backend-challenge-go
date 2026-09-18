@@ -1,4 +1,4 @@
-// Package outbox drains the outbox table onto the outbound queue (§11). It runs
+// Package outbox drains the outbox table onto the outbound queue. It runs
 // in every instance; the claim is what keeps two of them off the same row.
 package outbox
 
@@ -16,7 +16,7 @@ import (
 
 // Event is one outbox row on its way out. Payload is the envelope exactly as
 // the originating commit wrote it, never rebuilt, so a republication is
-// byte-identical and keeps its EventID (§11).
+// byte-identical and keeps its EventID.
 type Event struct {
 	EventID     uuid.UUID
 	AggregateID uuid.UUID
@@ -56,7 +56,7 @@ func New(lc fx.Lifecycle, store Store, publisher Publisher, cfg config.Config, l
 	}
 
 	// Cancelling this is the last resort: OnStop first asks the loop to stop
-	// fetching and lets the cycle in flight finish (§4).
+	// fetching and lets the cycle in flight finish.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	lc.Append(fx.Hook{
@@ -70,7 +70,7 @@ func New(lc fx.Lifecycle, store Store, publisher Publisher, cfg config.Config, l
 		OnStop: func(ctx context.Context) error {
 			close(w.stop)
 
-			// Bounded by the worker's own share, not by the whole shutdown (§4).
+			// Bounded by the worker's own share, not by the whole shutdown.
 			drain, giveUp := context.WithTimeout(ctx, cfg.WorkerDrainTimeout)
 			defer giveUp()
 
@@ -122,7 +122,7 @@ func (w *Worker) cycle(ctx context.Context) int {
 	ctx, cancel := context.WithTimeout(ctx, w.cfg.OutboxPublishWindow)
 	defer cancel()
 	// One id per cycle: a claim that fails is diagnosed from the lines that
-	// share it (§12).
+	// share it.
 	ctx = correlation.NewContext(ctx, uuid.NewV7())
 
 	published, err := w.store.Drain(ctx, w.cfg.OutboxBatchSize, w.publisher.Publish)

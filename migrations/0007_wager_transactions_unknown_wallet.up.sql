@@ -1,4 +1,4 @@
--- §11 owes a WagerTransactionRejected to every rejection, which needs a row to
+-- The brief owes a WagerTransactionRejected to every rejection, which needs a row to
 -- emit from. A bet naming a wallet that does not exist is refused with
 -- WALLET_NOT_FOUND, and the foreign key is what stopped that refusal being
 -- recorded, so it goes. The column stays NOT NULL: the requested wallet id is

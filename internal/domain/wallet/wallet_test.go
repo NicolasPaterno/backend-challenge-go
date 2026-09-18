@@ -92,7 +92,7 @@ func TestNewRejectsUninitialisedValues(t *testing.T) {
 	}
 }
 
-// The guard tests IsValid, never IsZero: a zero opening balance is valid (§9).
+// The guard tests IsValid, never IsZero: a zero opening balance is valid.
 func TestNewAcceptsZeroBalance(t *testing.T) {
 	w := newWallet(t, "0.00")
 
@@ -206,7 +206,7 @@ func TestMovementCurrencyMustMatchWallet(t *testing.T) {
 	}
 }
 
-// §7, LOSS row.
+// LOSS row.
 func TestZeroMovementChangesNothing(t *testing.T) {
 	for name, move := range map[string]func(*wallet.Wallet, money.Money) (*wallet.LedgerEntry, error){
 		"debit": func(w *wallet.Wallet, m money.Money) (*wallet.LedgerEntry, error) {

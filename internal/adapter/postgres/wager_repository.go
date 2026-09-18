@@ -26,8 +26,8 @@ func NewWagerRepository(pool *pgxpool.Pool) *WagerRepository {
 }
 
 const (
-	// §8's coordination point. Per wallet, so independent wallets still run in
-	// parallel; no advisory or table-wide lock is taken anywhere (§5.6).
+	// the coordination point. Per wallet, so independent wallets still run in
+	// parallel; no advisory or table-wide lock is taken anywhere.
 	//
 	// NO KEY UPDATE rather than UPDATE: the id never changes here, and the
 	// weaker mode does not conflict with the FOR KEY SHARE that a foreign key
@@ -42,14 +42,14 @@ const (
 			reference_deadline_at, failure_code, result_balance_minor, created_at, updated_at
 		) VALUES ($1, 'EXTERNAL', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`
 
-	// The two indexes §9's idempotency rests on, and the only ones whose
+	// The two indexes the idempotency rests on, and the only ones whose
 	// violation means "this operation already exists". The reversal index of
 	// 0009 is deliberately absent: reaching it means the lock below failed to
 	// serialise two reversals, which is a bug, not a replay.
 	idempotencyKeyIndex = "wager_transactions_provider_key_unique"
 	externalIDIndex     = "wager_transactions_provider_external_unique"
 
-	// §6.5: one handling per (consumerName, messageId). There is one consumer,
+	// one handling per (consumerName, messageId). There is one consumer,
 	// so its name is a constant rather than a setting nothing would vary.
 	consumerName = "wager-transactions"
 	inboxIndex   = "inbox_messages_pkey"
@@ -62,7 +62,7 @@ const (
 		SELECT payload_hash FROM inbox_messages WHERE consumer_name = $1 AND message_id = $2`
 
 	// Redundant under the lock above, and what still refuses a lost update if a
-	// caller ever reaches this statement without it (§5.7).
+	// caller ever reaches this statement without it.
 	updateWalletBalance = `
 		UPDATE wallets SET balance_minor = $2, version = $3, updated_at = $4
 		WHERE id = $1 AND version = $5`
@@ -71,8 +71,7 @@ const (
 func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransaction, inbox wageringapp.Inbox, decide wageringapp.Decide) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		// First, so a redelivery is answered before any work is repeated, and in
-		// this transaction, so the record and what it caused commit together
-		// (§6.5).
+		// this transaction, so the record and what it caused commit together.
 		if !inbox.IsZero() {
 			_, err := tx.Exec(ctx, insertInbox,
 				consumerName, inbox.MessageID, t.PayloadHash(), inbox.ReceivedAt)
@@ -85,7 +84,7 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 		}
 
 		// A wallet that does not exist is handed to decide as nil: the rejection
-		// it produces is recorded like any other (§11).
+		// it produces is recorded like any other.
 		w, err := scanWallet(tx.QueryRow(ctx, lockWallet, t.WalletID()), t.WalletID())
 		switch {
 		case isLockNotAvailable(err):
@@ -102,8 +101,8 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 		// Read under the same transaction as the decision it feeds. No lock of
 		// its own: a reversal only reaches PROCESSED after agreeing with its
 		// reference on the wallet, so two that could collide already hold the
-		// lock above. §8 puts the coordination per wallet and 0009's index is
-		// what guarantees the rule in the schema (§5.3, §5.8).
+		// lock above. The brief puts the coordination per wallet and 0009's index is
+		// what guarantees the rule in the schema.
 		var ref *wageringapp.Reference
 		if t.Kind().IsReversal() {
 			if ref, err = reference(ctx, tx, t); err != nil {
@@ -136,7 +135,7 @@ func (r *WagerRepository) Process(ctx context.Context, t *wagering.WagerTransact
 }
 
 // applyOutcome writes what the decision produced beyond the transaction row
-// itself: the movement, if there was one, and the events it owes (§5.4). Shared
+// itself: the movement, if there was one, and the events it owes. Shared
 // by the submission path and the resumption path, which differ only in whether
 // that row is inserted or updated.
 func applyOutcome(ctx context.Context, tx pgx.Tx, w *wallet.Wallet, observed int64, entry *wallet.LedgerEntry, outbox []events.Envelope) error {
@@ -177,7 +176,7 @@ const (
 	claimWaiting = selectTransaction + "id = $1 AND status = 'PENDING_REFERENCE' FOR UPDATE SKIP LOCKED"
 
 	// Doubling from one second, capped at five minutes, with the integer shift
-	// the outbox uses — power() is floating point (§5.1). next_attempt_at on a
+	// the outbox uses — power() is floating point. next_attempt_at on a
 	// record that has finished is read by nothing: the index above is partial.
 	resumeOutcome = `
 		UPDATE wager_transactions
@@ -275,7 +274,7 @@ const anySuccessfulReversal = `
 		  AND status = 'PROCESSED'
 		  AND kind IN ('REFUND', 'ROLLBACK'))`
 
-// reference resolves §7's (providerId, referenceExternalTransactionId). A nil
+// reference resolves the (providerId, referenceExternalTransactionId). A nil
 // result means nothing matched, which the use case waits on rather than
 // refuses (A.8.2).
 func reference(ctx context.Context, q querier, t *wagering.WagerTransaction) (*wageringapp.Reference, error) {

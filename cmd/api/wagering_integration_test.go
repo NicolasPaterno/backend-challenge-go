@@ -109,7 +109,7 @@ type betResult struct {
 }
 
 // kind, currency and reference are empty in the many BET cases below, where
-// the zero value stands for the §9 example request.
+// the zero value stands for the brief's example request.
 type bet struct {
 	externalID string
 	key        string
@@ -180,7 +180,7 @@ func (w *wagering) bet(b bet) betResult {
 }
 
 // transaction reads one operation back, which is how a test observes work the
-// reference worker finished after the request had already answered 202 (§9).
+// reference worker finished after the request had already answered 202.
 func (w *wagering) transaction(id string) (status, code string) {
 	w.t.Helper()
 
@@ -282,7 +282,6 @@ func (w *wagering) debits(walletID string) int {
 	return debits
 }
 
-// §13.1.
 func TestSameBetInParallelDebitsOnce(t *testing.T) {
 	api := startWagering(t)
 	playerID := uuid.NewV7().String()
@@ -323,7 +322,6 @@ func TestSameBetInParallelDebitsOnce(t *testing.T) {
 	}
 }
 
-// §8, §13.2.
 func TestTwoBetsRaceForOneBalance(t *testing.T) {
 	api := startWagering(t)
 	playerID := uuid.NewV7().String()
@@ -369,7 +367,7 @@ func TestTwoBetsRaceForOneBalance(t *testing.T) {
 		t.Errorf("ledger debits = %d, want 1", got)
 	}
 
-	// §9: an equivalent resubmission reports the flag with the persisted
+	// an equivalent resubmission reports the flag with the persisted
 	// result, rejection included.
 	for _, b := range bets {
 		replay := api.bet(b)
@@ -382,7 +380,6 @@ func TestTwoBetsRaceForOneBalance(t *testing.T) {
 	}
 }
 
-// §13.3.
 func TestDistinctWalletsProceedInParallel(t *testing.T) {
 	api := startWagering(t)
 
@@ -417,7 +414,6 @@ func TestDistinctWalletsProceedInParallel(t *testing.T) {
 	}
 }
 
-// §9.
 func TestReplayReturnsTheOriginalBalance(t *testing.T) {
 	api := startWagering(t)
 	playerID := uuid.NewV7().String()
@@ -460,7 +456,7 @@ func TestReplayReturnsTheOriginalBalance(t *testing.T) {
 	}
 }
 
-// §11 owes a rejection event to an unknown wallet, so the refusal is a record,
+// The brief owes a rejection event to an unknown wallet, so the refusal is a record,
 // not a 404 that leaves nothing behind.
 func TestBetAgainstAnUnknownWalletIsRecorded(t *testing.T) {
 	api := startWagering(t)
@@ -502,7 +498,7 @@ func TestBetAgainstAnUnknownWalletIsRecorded(t *testing.T) {
 	}
 }
 
-// §8: a wallet held past DB_LOCK_TIMEOUT answers 503 rather than queueing until
+// a wallet held past DB_LOCK_TIMEOUT answers 503 rather than queueing until
 // the caller gives up.
 func TestAContendedWalletIsRefusedNotQueued(t *testing.T) {
 	t.Setenv("DB_LOCK_TIMEOUT", "300ms")
@@ -549,7 +545,6 @@ func TestAContendedWalletIsRefusedNotQueued(t *testing.T) {
 	}
 }
 
-// §2, §13.
 func TestProvidersAreIsolated(t *testing.T) {
 	api := startWagering(t)
 	issuer := testsupport.KeycloakIssuer(t)
@@ -675,7 +670,7 @@ func TestLossSettlesWithoutMovingMoney(t *testing.T) {
 	}
 }
 
-// §7 writes the LOSS rule as money.amount == "0.00"; A.3.1 reads it as the
+// The brief writes the LOSS rule as money.amount == "0.00"; A.3.1 reads it as the
 // value zero, so an equivalent spelling is accepted and a non-zero is refused.
 func TestLossAmountPolicy(t *testing.T) {
 	api := startWagering(t)
@@ -787,7 +782,7 @@ func (w *wagering) outboxTypes(walletID string) []string {
 	return types
 }
 
-// §11: every outcome writes its events in the commit that caused it, and §5.4
+// every outcome writes its events in the commit that caused it, and the brief
 // leaves them unpublished until 11 exists.
 func TestOutcomesWriteTheirEventsToTheOutbox(t *testing.T) {
 	api := startWagering(t)
@@ -805,7 +800,7 @@ func TestOutcomesWriteTheirEventsToTheOutbox(t *testing.T) {
 	want := []string{
 		"WagerTransactionProcessed", "WalletBalanceChanged", // the opening
 		"WagerTransactionProcessed", "WalletBalanceChanged", // the BET
-		"WagerTransactionProcessed", // the LOSS moves nothing (§7)
+		"WagerTransactionProcessed", // the LOSS moves nothing
 		"WagerTransactionRejected",  // insufficient funds
 	}
 	rows := api.outbox(walletID)
@@ -815,7 +810,7 @@ func TestOutcomesWriteTheirEventsToTheOutbox(t *testing.T) {
 
 	for _, row := range rows {
 		if row.published != nil {
-			t.Errorf("%s is published, but nothing publishes before 11 (§5.4)", row.eventType)
+			t.Errorf("%s is published, but only the outbox worker may publish", row.eventType)
 		}
 		for _, field := range []string{"eventId", "eventType", "aggregateId", "correlationId", "occurredAt", "version", "data"} {
 			if _, ok := row.payload[field]; !ok {
@@ -827,14 +822,14 @@ func TestOutcomesWriteTheirEventsToTheOutbox(t *testing.T) {
 		}
 	}
 
-	// A replay re-applies nothing, so it owes no second copy (§9).
+	// A replay re-applies nothing, so it owes no second copy.
 	api.bet(bet{externalID: "t-bet", key: "provider-a:t-bet", playerID: playerID, walletID: walletID, amount: "25.00"})
 	if got := api.outboxTypes(walletID); !slices.Equal(got, want) {
 		t.Errorf("after the replay, outbox = %v, want the unchanged %v", got, want)
 	}
 }
 
-// §9: a zero opening creates no OPENING, no ledger entry and none of these
+// a zero opening creates no OPENING, no ledger entry and none of these
 // financial events.
 func TestZeroOpeningWritesNoEvents(t *testing.T) {
 	api := startWagering(t)

@@ -41,7 +41,7 @@ func TestParseAcceptsEquivalentSpellings(t *testing.T) {
 		"025.00":  2500,
 		"025.0":   2500,
 		"025":     2500,
-		"0.00":    0, // LOSS requires exactly this (§7)
+		"0.00":    0, // LOSS requires exactly this
 		"0":       0,
 		"0.01":    1,
 		"0.1":     10,
@@ -77,8 +77,8 @@ func TestParseRejectsMalformedAmounts(t *testing.T) {
 	}
 }
 
-// An invalid amount must never be rounded into a valid one (§6.1).
-// §6.1 allows equivalent forms only if the normalisation is documented, and §9
+// An invalid amount must never be rounded into a valid one.
+// The brief allows equivalent forms only if the normalisation is documented, and the brief
 // requires HTTP and SQS to agree: every spelling must collapse to one value and
 // one canonical rendering before anything hashes it.
 func TestEquivalentSpellingsAreIndistinguishable(t *testing.T) {
@@ -362,7 +362,7 @@ func TestUnmarshalAppliesParseRules(t *testing.T) {
 	}
 }
 
-// Reconciliation reports a difference that may be negative (§9), so marshalling
+// Reconciliation reports a difference that may be negative, so marshalling
 // must render a sign even though unmarshalling refuses to read one.
 func TestMarshalRendersNegativeDifference(t *testing.T) {
 	difference, err := mustParse(t, "10.00", money.BRL).Sub(mustParse(t, "15.00", money.BRL))

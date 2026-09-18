@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package testsupport starts the real infrastructure the integration tests run
-// against; §13 forbids replacing it with mocks.
+// against; the brief forbids replacing it with mocks.
 package testsupport
 
 import (

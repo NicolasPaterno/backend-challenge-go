@@ -65,7 +65,7 @@ func TestReconciliationAgreesAfterMixedOperationsAndChangesNothing(t *testing.T)
 	if report.Difference.Amount != "0.00" || report.Difference.Currency != "BRL" {
 		t.Errorf("difference = %s %s, want 0.00 BRL", report.Difference.Amount, report.Difference.Currency)
 	}
-	// The opening, the bet and the win; the LOSS moves nothing (§7).
+	// The opening, the bet and the win; the LOSS moves nothing.
 	if report.CheckedEntries != 3 {
 		t.Errorf("checkedEntries = %d, want 3", report.CheckedEntries)
 	}
@@ -106,7 +106,7 @@ func TestReconciliationReportsADivergenceAndCountsIt(t *testing.T) {
 }
 
 // A movement committing while the balance and the ledger are read must not
-// look like a divergence: both sides come from one snapshot (§9).
+// look like a divergence: both sides come from one snapshot.
 func TestReconciliationDoesNotSeeAConcurrentMovement(t *testing.T) {
 	api := startWagering(t)
 	playerID := uuid.NewV7().String()

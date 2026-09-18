@@ -18,7 +18,7 @@ func NewGuard(verifier *auth.Verifier, logger *slog.Logger) *Guard {
 }
 
 // Require refuses before the handler runs, so a rejected request has no
-// financial effect and its body carries no wallet data (§13). An empty scope
+// financial effect and its body carries no wallet data. An empty scope
 // asks only for a valid token.
 func (g *Guard) Require(scope string, next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

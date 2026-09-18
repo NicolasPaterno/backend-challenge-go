@@ -27,9 +27,9 @@ type Problem struct {
 	Detail string `json:"detail,omitempty"`
 	// Instance identifies this occurrence: for a business rejection, the
 	// transaction the refusal was recorded against, so the provider can query
-	// it (RFC 9457 §3.1.4, §9).
+	// it (RFC 9457).
 	Instance string `json:"instance,omitempty"`
-	// §9 requires an equivalent resubmission to report the flag with the
+	// The brief requires an equivalent resubmission to report the flag with the
 	// persisted result, and a rejection's result is this body. Absent on a
 	// problem that is not a submission outcome.
 	IdempotentReplay *bool       `json:"idempotentReplay,omitempty"`
@@ -128,7 +128,7 @@ func writeRejection(w http.ResponseWriter, status int, t *wagering.WagerTransact
 	})
 }
 
-// §9 requires transient unavailability to be distinguishable from a permanent
+// The brief requires transient unavailability to be distinguishable from a permanent
 // failure by the contract alone. pgx marks a failure that never reached the
 // server as safe to retry; the interface is matched rather than imported, so
 // the HTTP edge stays free of the driver.
@@ -146,7 +146,7 @@ func writeUnavailable(w http.ResponseWriter, detail string) {
 	writeProblem(w, http.StatusServiceUnavailable, CodeUnavailable, detail)
 }
 
-// The cause is logged, never returned: §12 forbids leaking internals to callers.
+// The cause is logged, never returned: the brief forbids leaking internals to callers.
 func failInternal(logger *slog.Logger, w http.ResponseWriter, r *http.Request, operation string, err error) {
 	logger.ErrorContext(r.Context(), operation+" failed", slog.Any("error", err))
 	writeUnavailableOrInternal(w, err)

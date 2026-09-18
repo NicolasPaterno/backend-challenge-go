@@ -19,8 +19,8 @@ import (
 	"github.com/NicolasPaterno/backend-challenge-go/internal/testsupport"
 )
 
-// §13.1, over three processes and both transports. The amount is spelled three
-// ways, because §9 and §10 make the hash the equality test and A.3.1 normalises
+// over three processes and both transports. The amount is spelled three
+// ways, because the brief make the hash the equality test and A.3.1 normalises
 // "25", "25.0" and "25.00" to one amount — a hash over the received text would
 // turn these into payload conflicts instead of replays.
 func TestTheSameBetFiftyTimesAcrossInstancesDebitsOnce(t *testing.T) {
@@ -55,7 +55,7 @@ func TestTheSameBetFiftyTimesAcrossInstancesDebitsOnce(t *testing.T) {
 		}()
 	}
 	// The other ten arrive on the queue, each a message of its own, so the
-	// deduplication being exercised is the application's and not FIFO's (§13).
+	// deduplication being exercised is the application's and not FIFO's.
 	for i := 40; i < 50; i++ {
 		c.enqueue(fmt.Sprintf("msg-%d", i), op(i))
 	}
@@ -89,7 +89,7 @@ func TestTheSameBetFiftyTimesAcrossInstancesDebitsOnce(t *testing.T) {
 	}
 }
 
-// §8's mandatory race and §13.2, with each bet sent to a different process.
+// the mandatory race and the brief, with each bet sent to a different process.
 func TestTwoBetsOfEightyRaceForOneHundredAcrossInstances(t *testing.T) {
 	c := startCluster(t)
 	playerID := uuid.NewV7().String()
@@ -143,11 +143,11 @@ func TestTwoBetsOfEightyRaceForOneHundredAcrossInstances(t *testing.T) {
 	}
 
 	assert("race", race())
-	// §9: resubmitting both reproduces the stored outcome and moves nothing.
+	// resubmitting both reproduces the stored outcome and moves nothing.
 	assert("resubmission", race())
 }
 
-// §13.3 and §5.6: a wallet held by another writer must not hold up a different
+// a wallet held by another writer must not hold up a different
 // wallet. The lock is taken by the test itself, so the overlap is observed
 // rather than assumed — the blocked bet is still waiting when the other
 // instance answers for its own wallet.
@@ -188,7 +188,7 @@ func TestAHeldWalletDoesNotBlockAnother(t *testing.T) {
 	default:
 	}
 
-	// §8: waiting on the row is bounded, and a wallet held past the bound is
+	// waiting on the row is bounded, and a wallet held past the bound is
 	// refused rather than queued forever.
 	if result := <-blocked; result.Status != http.StatusServiceUnavailable {
 		t.Errorf("the held wallet answered %d, want 503", result.Status)
@@ -205,7 +205,7 @@ func TestAHeldWalletDoesNotBlockAnother(t *testing.T) {
 	}
 }
 
-// §13.5 and §13.4: one instance is killed outright while the queue is being
+// one instance is killed outright while the queue is being
 // worked, and every message is then redelivered to the survivors. A redelivery
 // of work that had already committed must change nothing.
 func TestAKilledConsumerLosesNoMessageAndDuplicatesNoDebit(t *testing.T) {
@@ -225,11 +225,11 @@ func TestAKilledConsumerLosesNoMessageAndDuplicatesNoDebit(t *testing.T) {
 	send()
 	// The kill lands while the queue is being worked, one handling after the
 	// first commit: whichever instance dies, no message may be lost and none
-	// may be applied twice (§13.5).
+	// may be applied twice.
 	c.awaitCommittedTransactions(1)
 	c.kill(c.nodes[0])
 
-	// The same message ids again: proven repeated receipts, which is what §13
+	// The same message ids again: proven repeated receipts, which is what the brief
 	// asks the deduplication be exercised with.
 	c.awaitQueueDrained()
 	send()
@@ -243,7 +243,7 @@ func TestAKilledConsumerLosesNoMessageAndDuplicatesNoDebit(t *testing.T) {
 	}
 }
 
-// §13.7 and §13.8: a reversal committed as PENDING_REFERENCE survives the death
+// a reversal committed as PENDING_REFERENCE survives the death
 // of the instance that accepted it, and another one takes it over.
 func TestAPendingReferenceIsTakenOverByAnotherInstance(t *testing.T) {
 	c := startCluster(t)
@@ -271,7 +271,7 @@ func TestAPendingReferenceIsTakenOverByAnotherInstance(t *testing.T) {
 		t.Errorf("balance = %s, want 100.00 — the bet debited and the refund returned it", balance)
 	}
 
-	// §13.8: idempotency is persistent, so the same bet under the same key
+	// idempotency is persistent, so the same bet under the same key
 	// after the restart is a replay carrying its original balance.
 	replay := c.submit(c.node(1), operation{
 		externalID: "bet-late", playerID: playerID, walletID: walletID, amount: "30.00"})
@@ -280,7 +280,7 @@ func TestAPendingReferenceIsTakenOverByAnotherInstance(t *testing.T) {
 	}
 }
 
-// §13.6 and §11: three publishers drain one outbox, one of them dies mid-flight,
+// three publishers drain one outbox, one of them dies mid-flight,
 // and every event still reaches the queue exactly once under its own eventId.
 func TestThreePublishersPublishEveryEventOnce(t *testing.T) {
 	c := startCluster(t)

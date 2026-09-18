@@ -1,4 +1,4 @@
--- §7's retry state for a reversal waiting on its reference: how many times it
+-- the retry state for a reversal waiting on its reference: how many times it
 -- has been looked for, when to look again, and when to give up.
 --
 -- The deadline is stamped when the wait is recorded, from REFERENCE_TTL, so a

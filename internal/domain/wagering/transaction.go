@@ -1,5 +1,5 @@
 // Package wagering holds the operation record: one row per financial request,
-// its state machine, and the rules each kind must satisfy (§6.3, §7).
+// its state machine, and the rules each kind must satisfy.
 package wagering
 
 import (
@@ -31,7 +31,7 @@ var (
 // malformed — a non-zero LOSS, an OPENING from outside, a reversal with no
 // reference. None of them produces a record, so none carries a FailureCode
 // (A.3.5), and no retry changes the answer: HTTP reports them as invalid input
-// and the consumer treats them as permanent (§10).
+// and the consumer treats them as permanent.
 func IsRefusal(err error) bool {
 	refusals := []error{
 		ErrOpeningIsInternal,
@@ -76,7 +76,7 @@ func (k Kind) IsValid() bool {
 }
 
 // IsReversal reports the kinds that undo an earlier operation and therefore
-// require a reference (§7).
+// require a reference.
 func (k Kind) IsReversal() bool { return k == KindRefund || k == KindRollback }
 
 func (k Kind) String() string { return string(k) }
@@ -93,7 +93,7 @@ const (
 
 // Terminal states are absent as keys: a transition out of one is refused by the
 // lookup itself, which is what makes a replay read the stored result instead of
-// re-applying the operation (§6.3).
+// re-applying the operation.
 var transitions = map[Status][]Status{
 	StatusPending:          {StatusPendingReference, StatusProcessed, StatusRejected, StatusFailed},
 	StatusPendingReference: {StatusProcessed, StatusRejected, StatusFailed},
@@ -154,7 +154,7 @@ type WagerTransaction struct {
 
 // NewExternalParams carries the fields of an operation arriving over HTTP or
 // SQS. A struct rather than thirteen positional arguments, six of them adjacent
-// strings that would swap silently (03 §13 took the opposite call for the
+// strings that would swap silently (the brief took the opposite call for the
 // wallet's four).
 type NewExternalParams struct {
 	ID                             uuid.UUID
@@ -173,7 +173,7 @@ type NewExternalParams struct {
 }
 
 // NewExternal accepts an operation from a provider. It refuses OPENING, which
-// is reserved for internal wallet opening (§6.3, A.1 requirement 2), so both
+// is reserved for internal wallet opening (A.1 requirement 2), so both
 // transports reject it through the one constructor.
 func NewExternal(p NewExternalParams) (*WagerTransaction, error) {
 	if p.Kind == KindOpening {
@@ -253,7 +253,7 @@ func NewInternalOpening(p NewInternalOpeningParams) (*WagerTransaction, error) {
 }
 
 // RehydrateParams is every persisted column. Rehydrate rebuilds the record from one
-// without re-running kind rules or re-applying any movement (§6).
+// without re-running kind rules or re-applying any movement.
 type RehydrateParams struct {
 	ID                             uuid.UUID
 	Origin                         Origin
@@ -369,14 +369,14 @@ func (t *WagerTransaction) ReferenceExternalTransactionID() string {
 func (t *WagerTransaction) ReferenceTransactionID() uuid.UUID { return t.referenceTransactionID }
 
 // ReferenceDeadlineAt is when this wait stops being retried and becomes a
-// rejection (§7). Zero unless the record is, or has been, PENDING_REFERENCE.
+// rejection. Zero unless the record is, or has been, PENDING_REFERENCE.
 func (t *WagerTransaction) ReferenceDeadlineAt() time.Time { return t.referenceDeadlineAt }
 
 func (t *WagerTransaction) FailureCode() FailureCode { return t.failureCode }
 
 // ResultBalance is the balance reported back when this transaction reached
 // PROCESSED or REJECTED, which a replay returns unchanged even after later
-// movements (§9). Invalid when none was recorded.
+// movements. Invalid when none was recorded.
 func (t *WagerTransaction) ResultBalance() money.Money { return t.resultBalance }
 
 func (t *WagerTransaction) CreatedAt() time.Time { return t.createdAt }
@@ -399,7 +399,7 @@ func (t *WagerTransaction) MarkProcessed(resultBalance money.Money, now time.Tim
 
 // ResolveReference records the internal id the lookup by
 // (providerId, referenceExternalTransactionId) found, so a reversal keeps a
-// link to what it undid even when it is then rejected (§6.3, §7).
+// link to what it undid even when it is then rejected.
 func (t *WagerTransaction) ResolveReference(id uuid.UUID) error {
 	if !t.kind.IsReversal() {
 		return fmt.Errorf("%w: %s", ErrNoReference, t.kind)
@@ -413,7 +413,7 @@ func (t *WagerTransaction) ResolveReference(id uuid.UUID) error {
 
 // MarkPendingReference records the wait and the deadline it is accepted under.
 // The deadline is stamped here, once, so a later change of REFERENCE_TTL cannot
-// expire a reversal that was already waiting (§7).
+// expire a reversal that was already waiting.
 func (t *WagerTransaction) MarkPendingReference(deadlineAt, now time.Time) error {
 	if deadlineAt.IsZero() {
 		return fmt.Errorf("%w: referenceDeadlineAt", ErrUninitialized)
@@ -428,17 +428,17 @@ func (t *WagerTransaction) MarkPendingReference(deadlineAt, now time.Time) error
 	return nil
 }
 
-// ReferenceExpired reports that the wait has run out (§7).
+// ReferenceExpired reports that the wait has run out.
 func (t *WagerTransaction) ReferenceExpired(now time.Time) bool {
 	return t.status == StatusPendingReference && !now.Before(t.referenceDeadlineAt)
 }
 
 // Reject records a business refusal. The code is the caller's to choose: the
 // wallet reports insufficient funds with one sentinel and cannot know whether
-// it refused a bet or a reversal, which §7 requires be told apart (03 §7).
+// it refused a bet or a reversal, which the brief requires be told apart.
 //
 // resultBalance is the balance to report back, which a replay must return
-// unchanged (§9). Pass the zero money.Money when there is none to report — a
+// unchanged. Pass the zero money.Money when there is none to report — a
 // rejection for an unknown wallet has no balance to observe.
 func (t *WagerTransaction) Reject(code FailureCode, resultBalance money.Money, now time.Time) error {
 	if resultBalance.IsValid() && resultBalance.IsNegative() {
@@ -451,7 +451,7 @@ func (t *WagerTransaction) Reject(code FailureCode, resultBalance money.Money, n
 	return nil
 }
 
-// Fail records a permanent infrastructure failure for audit (§6.3). Transient
+// Fail records a permanent infrastructure failure for audit. Transient
 // failures are retried instead and never reach this method.
 func (t *WagerTransaction) Fail(code FailureCode, now time.Time) error {
 	return t.finish(StatusFailed, code, now)
@@ -468,7 +468,7 @@ func (t *WagerTransaction) finish(to Status, code FailureCode, now time.Time) er
 	return nil
 }
 
-// The single writer of status: a rejection is an error return, never a panic (§6).
+// The single writer of status: a rejection is an error return, never a panic.
 func (t *WagerTransaction) transition(to Status, now time.Time) error {
 	if now.IsZero() {
 		return fmt.Errorf("%w: now", ErrUninitialized)
@@ -505,7 +505,7 @@ func checkCommon(id, walletID, playerID uuid.UUID, kind Kind, amount money.Money
 	return checkAmount(kind, amount)
 }
 
-// §7's per-kind reference policy. A reversal must cite what it undoes; a WIN
+// the per-kind reference policy. A reversal must cite what it undoes; a WIN
 // "may cite a bet from the same round", so a reference is optional there; a BET
 // or a LOSS has nothing to reference and carrying one is a malformed request,
 // not a field to ignore.
@@ -519,7 +519,7 @@ func checkReference(kind Kind, reference string) error {
 	return nil
 }
 
-// §7's per-kind amount policy. LOSS is tested with IsZero, not against the
+// the per-kind amount policy. LOSS is tested with IsZero, not against the
 // literal "0.00": "0" and "0.0" are the same amount after A.3.1's
 // normalisation, and a string comparison would refuse a valid LOSS.
 func checkAmount(kind Kind, amount money.Money) error {
@@ -529,8 +529,8 @@ func checkAmount(kind Kind, amount money.Money) error {
 			return fmt.Errorf("%w: %s got %s", ErrAmountNotZero, kind, amount)
 		}
 	case KindOpening:
-		// §7 accepts zero as an initial balance; the use case skips the
-		// OPENING entirely in that case (§9), so only a negative is refused.
+		// The brief accepts zero as an initial balance; the use case skips the
+		// OPENING entirely in that case, so only a negative is refused.
 		if amount.IsNegative() {
 			return fmt.Errorf("%w: %s got %s", money.ErrNegativeAmount, kind, amount)
 		}
